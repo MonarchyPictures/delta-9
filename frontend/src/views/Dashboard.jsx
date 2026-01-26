@@ -31,7 +31,7 @@ const Dashboard = () => {
       try {
         if (!isPolling) setLoading(true);
         
-        const fetchWithTimeout = async (url, timeout = 8000) => {
+        const fetchWithTimeout = async (url, timeout = 15000) => {
           const requestController = new AbortController();
           const timeoutId = setTimeout(() => requestController.abort(), timeout);
           
@@ -44,6 +44,10 @@ const Dashboard = () => {
             return res.json();
           } catch (err) {
             clearTimeout(timeoutId);
+            if (err.name === 'AbortError' || err.message?.includes('aborted')) {
+              // Return a "cancelled" marker that Promise.allSettled will catch as fulfilled or we can filter
+              throw { name: 'AbortError', message: 'Request was aborted' };
+            }
             throw err;
           }
         };
@@ -105,6 +109,7 @@ const Dashboard = () => {
         }
       } catch (err) {
         if (!isMounted) return;
+        if (err.name === 'AbortError' || err.message?.includes('aborted')) return;
         console.error("Dashboard fetch error:", err);
         setError({
           type: 'error',
@@ -185,9 +190,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Stats Overview */}
-      <SummaryCards stats={stats} />
-
+      {/* Recent High-Intent Signals - Primary Focus */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Recent High-Intent Signals */}
         <motion.div 

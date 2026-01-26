@@ -37,7 +37,8 @@ class LeadValidator:
         deal_prob = self._calculate_deal_probability(intent_score, readiness, urgency, budget, specs, text, budget_ready, deadline)
         
         # Location logic
-        location_raw = entities["locations"][0] if entities["locations"] else "Unknown"
+        # Fallback to raw_data location if NLP fails
+        location_raw = entities["locations"][0] if entities["locations"] else raw_data.get("location", "Unknown")
         lat, lon = self.geo.get_coordinates(location_raw)
         
         # Delivery Range Score (0-100)
@@ -59,10 +60,20 @@ class LeadValidator:
 
         # Strict Filtering: Must have at least one contact method
         # We allow social links even if not "verified" by external API as long as they exist
+        platform = raw_data.get("source", "Unknown")
+        is_social = platform.lower() in ["facebook", "twitter", "reddit", "tiktok", "instagram"]
+        
+        import logging
+        logger = logging.getLogger("radar_api")
+        
         if not (is_phone_v or is_email_v or social_link):
-            import logging
-            logging.getLogger("radar_api").info(f"Normalization failed: No contact method for {social_link}")
+            logger.info(f"Normalization dropped lead: No contact method. Phone: {phone}, Email: {email}, Link: {social_link}")
             return None # Drop leads with zero working contact methods
+            
+        # Social Filtering: Require some intent for social posts to avoid homepages/landing pages
+        if is_social and intent_score < 0.35: # Increased from 0.2 to be more selective
+            logger.info(f"Normalization dropped {platform} lead: Low intent score ({intent_score}). Link: {social_link}")
+            return None
             
         reliability_score, preferred_method = self.verifier.calculate_reliability_score({
             "contact_phone": phone_to_save if is_phone_v else None,

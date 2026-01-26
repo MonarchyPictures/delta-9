@@ -1,7 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import StatusBadge from './StatusBadge';
 import { ArrowRight, ExternalLink, Zap, X, Shield, MapPin, Users, Target, Calendar, MessageSquare, Phone, Globe, ShieldCheck } from 'lucide-react';
+/**
+ * @typedef {import('./LeadCard').Lead} Lead
+ */
 
+/**
+ * @param {{
+ *   leads: Lead[],
+ *   autoOpenId?: string | null,
+ *   onModalClose?: () => void
+ * }} props
+ */
 const LeadTable = ({ leads, autoOpenId = null, onModalClose = () => {} }) => {
   const [selectedLead, setSelectedLead] = useState(null);
 
@@ -17,7 +27,8 @@ const LeadTable = ({ leads, autoOpenId = null, onModalClose = () => {} }) => {
   const handleEngage = async (e, lead) => {
     e.stopPropagation();
     try {
-      await fetch(`${import.meta.env.VITE_API_URL}/outreach/contact/${lead.id}`, {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      await fetch(`${apiUrl}/outreach/contact/${lead.id}`, {
         method: 'POST',
       });
     } catch (err) {

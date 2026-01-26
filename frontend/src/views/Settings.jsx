@@ -3,11 +3,11 @@ import {
   Settings as SettingsIcon, Shield, Bell, Zap, Database, Globe, Lock, 
   Sliders, Smartphone, Mail, Info, Cpu, Activity, 
   RefreshCcw, Save, AlertTriangle, CheckCircle2, ChevronRight,
-  LayoutGrid
+  LayoutGrid, Volume2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const Settings = ({ notificationsEnabled, setNotificationsEnabled }) => {
+const Settings = ({ notificationsEnabled, setNotificationsEnabled, soundEnabled, setSoundEnabled }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState(null); // 'success', 'error'
   const [health, setHealth] = useState(null);
@@ -27,7 +27,7 @@ const Settings = ({ notificationsEnabled, setNotificationsEnabled }) => {
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
     const fetchHealth = async (signal) => {
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
       try {
         const res = await fetch(`${apiUrl}/health`, {
           signal: signal
@@ -39,14 +39,13 @@ const Settings = ({ notificationsEnabled, setNotificationsEnabled }) => {
         }
       } catch (err) {
         clearTimeout(timeoutId);
-        if (err.name !== 'AbortError') {
-          console.error("Health fetch failed:", err);
-        }
+        if (err.name === 'AbortError' || err.message?.includes('aborted')) return;
+        console.error("Health fetch failed:", err);
       }
     };
 
     const fetchSettings = async (signal) => {
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
       try {
         const res = await fetch(`${apiUrl}/settings`, {
           signal: signal
@@ -65,27 +64,28 @@ const Settings = ({ notificationsEnabled, setNotificationsEnabled }) => {
             if (data.notifications_enabled !== undefined) {
               setNotificationsEnabled(data.notifications_enabled);
             }
+            if (data.sound_enabled !== undefined) {
+              setSoundEnabled(data.sound_enabled);
+            }
           }
         }
       } catch (err) {
         clearTimeout(timeoutId);
-        if (err.name !== 'AbortError') {
-          console.error("Settings fetch failed:", err);
-        }
+        if (err.name === 'AbortError' || err.message?.includes('aborted')) return;
+        console.error("Settings fetch failed:", err);
       }
     };
 
     fetchHealth(controller.signal);
     fetchSettings(controller.signal);
     const interval = setInterval(() => {
-      const intervalController = new AbortController();
-      fetchHealth(intervalController.signal);
+      fetchHealth(controller.signal);
     }, 10000);
     return () => {
       controller.abort();
       clearInterval(interval);
     };
-  }, [setNotificationsEnabled]);
+  }, [setNotificationsEnabled, setSoundEnabled]);
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -98,7 +98,8 @@ const Settings = ({ notificationsEnabled, setNotificationsEnabled }) => {
       // Save all settings including UI preferences
       const settingsToSave = {
         ...uiPreferences,
-        notifications_enabled: notificationsEnabled
+        notifications_enabled: notificationsEnabled,
+        sound_enabled: soundEnabled
       };
       
       const res = await fetch(`${apiUrl}/settings`, {
@@ -247,6 +248,14 @@ const Settings = ({ notificationsEnabled, setNotificationsEnabled }) => {
                   active={notificationsEnabled}
                   onToggle={setNotificationsEnabled}
                   badge="Critical"
+                />
+                <SettingCard 
+                  variants={itemVariants}
+                  icon={<Volume2 className="text-brand-primary" size={20} />}
+                  title="Audible Alert Signal"
+                  description="Play a localized acoustic pulse when new high-value intelligence is captured."
+                  active={soundEnabled}
+                  onToggle={setSoundEnabled}
                 />
                 <SettingCard 
                   variants={itemVariants}

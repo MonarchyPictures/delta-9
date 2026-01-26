@@ -35,7 +35,8 @@ const CreateAgentModal = ({ isOpen, onClose, onSuccess }) => {
     setHasError(false);
     
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/agents`, {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/agents`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

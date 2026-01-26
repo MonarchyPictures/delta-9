@@ -7,8 +7,12 @@ class GeoService:
 
     def get_coordinates(self, location_name):
         """Convert location name to lat/long."""
+        if not location_name or location_name.lower() in ["unknown", "none", "null"]:
+            return None, None
+            
         try:
-            location = self.geolocator.geocode(location_name)
+            # Add timeout to avoid hanging
+            location = self.geolocator.geocode(location_name, timeout=2)
             if location:
                 return location.latitude, location.longitude
         except:

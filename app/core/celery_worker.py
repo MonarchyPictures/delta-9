@@ -1,7 +1,12 @@
 from celery import Celery
 import os
+import sys
 import logging
 from datetime import datetime, timedelta
+
+# Add project root to sys.path for absolute imports
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+
 from celery.schedules import crontab
 from app.db.database import SessionLocal
 from app.db import models
@@ -119,11 +124,20 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
                     logger.info(f"Skipping duplicate lead from {platform}: {normalized['buyer_request_snippet'][:50]}...")
                     continue
 
-                # STRICT KENYA FILTERING
+                # RELAXED KENYA FILTERING
                 loc = normalized.get("location_raw", "").lower()
-                is_kenya = "kenya" in loc or any(city.lower() in loc for city in ["nairobi", "mombasa", "kisumu", "nakuru", "eldoret"])
+                is_kenya = "kenya" in loc or any(city.lower() in loc for city in ["nairobi", "mombasa", "kisumu", "nakuru", "eldoret", "thika", "naivasha"])
+                
+                # If it's not explicitly Kenya but the query was for Kenya, and it's a social post, we'll keep it
+                # unless it explicitly mentions another country
+                if not is_kenya:
+                    other_countries = ["nigeria", "uganda", "tanzania", "usa", "uk", "india", "ghana", "south africa"]
+                    mentions_other = any(c in loc for c in other_countries)
+                    if not mentions_other and (location.lower() == "kenya" or "kenya" in query.lower()):
+                        is_kenya = True
                 
                 if not is_kenya:
+                    logger.info(f"Skipping lead due to location: {loc}")
                     continue
 
                 # Check for history of non-response

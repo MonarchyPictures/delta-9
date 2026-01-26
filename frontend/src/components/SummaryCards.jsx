@@ -2,11 +2,17 @@ import React from 'react';
 import { Target, Cpu, Activity, ArrowUpRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-const SummaryCards = ({ stats }) => {
+const SummaryCards = ({ stats = {} }) => {
+  const safeStats = {
+    todayActivity: stats?.todayActivity || '0',
+    totalLeads: stats?.totalLeads || '0',
+    activeAgents: stats?.activeAgents || '0',
+  };
+
   const cards = [
     { 
       label: "Identified Intents", 
-      value: stats.todayActivity, 
+      value: safeStats.todayActivity, 
       icon: Activity, 
       color: 'text-amber-600', 
       bgColor: 'bg-amber-50',
@@ -15,7 +21,7 @@ const SummaryCards = ({ stats }) => {
     },
     { 
       label: "Total Signals", 
-      value: stats.totalLeads, 
+      value: safeStats.totalLeads, 
       icon: Target, 
       color: 'text-blue-600', 
       bgColor: 'bg-blue-50',
@@ -24,7 +30,7 @@ const SummaryCards = ({ stats }) => {
     },
     { 
       label: "Active Fleet", 
-      value: stats.activeAgents, 
+      value: safeStats.activeAgents, 
       icon: Cpu, 
       color: 'text-purple-600', 
       bgColor: 'bg-purple-50',

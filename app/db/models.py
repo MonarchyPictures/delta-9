@@ -114,6 +114,7 @@ class Lead(Base):
     
     # Metadata
     status = Column(Enum(ContactStatus), default=ContactStatus.NOT_CONTACTED)
+    is_saved = Column(Integer, default=0) # 1 if saved for follow-up
     notes = Column(String)
     personalized_message = Column(String)
     

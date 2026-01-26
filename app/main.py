@@ -76,19 +76,23 @@ def health_check():
     }
     try:
         from app.core.celery_worker import celery_app
-        # If we're using Redis, try to ping it. If SQLite, just check if we can connect to the DB.
         broker_url = celery_app.conf.broker_url
+        
+        # Fast check: Is the broker reachable?
         if broker_url.startswith("redis"):
-            celery_app.control.ping(timeout=1.0)
-        health["services"]["celery"] = "up"
-    except Exception:
-        # If Redis ping fails, we check if we're in fallback mode
-        from app.core.celery_worker import celery_app
-        if "sqlite" in celery_app.conf.broker_url:
+            if check_redis():
+                health["services"]["celery"] = "up"
+            else:
+                health["services"]["celery"] = "down"
+                health["status"] = "degraded"
+        elif "sqlite" in broker_url:
             health["services"]["celery"] = "up (fallback)"
         else:
-            health["services"]["celery"] = "down"
-            health["status"] = "degraded"
+            health["services"]["celery"] = "up"
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        health["services"]["celery"] = "down"
+        health["status"] = "degraded"
     return health
 
 def check_redis():
@@ -269,6 +273,8 @@ class LeadSchema(BaseModel):
     pricing_strategy: Optional[str] = None
 
     status: str
+    is_saved: int = 0
+    notes: Optional[str] = None
     created_at: datetime
 
 class OutreachResponseSchema(BaseModel):
@@ -340,6 +346,43 @@ def list_agents(db: Session = Depends(get_db)):
         logger.error(f"Error listing agents: {e}")
         return []
 
+@app.patch("/leads/{lead_id}/save")
+def toggle_save_lead(lead_id: str, db: Session = Depends(get_db)):
+    """Toggle the is_saved status of a lead."""
+    lead = db.query(models.Lead).filter(models.Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    lead.is_saved = 1 if lead.is_saved == 0 else 0
+    db.commit()
+    return {"status": "success", "is_saved": lead.is_saved}
+
+class LeadUpdateSchema(BaseModel):
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    personalized_message: Optional[str] = None
+
+@app.patch("/leads/{lead_id}")
+def update_lead(lead_id: str, data: LeadUpdateSchema, db: Session = Depends(get_db)):
+    """Update lead status, notes, or personalized message."""
+    lead = db.query(models.Lead).filter(models.Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    if data.status:
+        try:
+            lead.status = models.ContactStatus(data.status.lower())
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {data.status}")
+            
+    if data.notes is not None:
+        lead.notes = data.notes
+
+    if data.personalized_message is not None:
+        lead.personalized_message = data.personalized_message
+        
+    db.commit()
+    return {"status": "success", "lead_id": lead_id}
+
 @app.get("/notifications", response_model=List[NotificationSchema])
 def get_notifications(db: Session = Depends(get_db)):
     try:
@@ -363,6 +406,8 @@ def get_settings(db: Session = Depends(get_db)):
 def search_leads(
     query: Optional[str] = None,
     location: str = "Kenya",
+    radius: Optional[str] = None,
+    category: Optional[str] = None,
     page: int = 1,
     limit: int = 10,
     hours: Optional[int] = None,
@@ -372,6 +417,8 @@ def search_leads(
     verified_only: bool = True,
     smart_match: bool = True,
     local_advantage: bool = False,
+    is_saved: Optional[bool] = None,
+    hot_only: bool = False,
     db: Session = Depends(get_db)
 ):
     """
@@ -381,33 +428,56 @@ def search_leads(
     try:
         db_query = db.query(models.Lead)
         
+        # Category Filter
+        if category and category.lower() != "all":
+            db_query = db_query.filter(models.Lead.product_category.ilike(f"%{category}%"))
+
+        # Radius Filter (Simplistic: filter by lead's radius_km if provided)
+        if radius and radius.lower() != "anywhere":
+            try:
+                radius_val = float(radius.replace('km', ''))
+                db_query = db_query.filter(models.Lead.radius_km <= radius_val)
+            except ValueError:
+                pass
+        
+        # Hot Leads Toggle
+        if hot_only:
+            db_query = db_query.filter(models.Lead.intent_score >= 0.7)
+            db_query = db_query.filter(models.Lead.readiness_level.in_(["HOT"]))
+
+        # Saved Leads Filter
+        if is_saved is not None:
+            db_query = db_query.filter(models.Lead.is_saved == (1 if is_saved else 0))
+        
         # Strict Verification Filter
-        if verified_only:
+        if verified_only and not is_saved and not live: # Don't filter out saved leads or live feed leads
             db_query = db_query.filter(models.Lead.is_contact_verified == 1)
-            db_query = db_query.filter(models.Lead.contact_reliability_score >= 10) # Minimum reliability threshold (allows social links)
+            db_query = db_query.filter(models.Lead.contact_reliability_score >= 10)
         
         # Live Feed Logic: Order by detection time (created_at) if live
         if live:
             db_query = db_query.order_by(models.Lead.created_at.desc())
-        
+            # For live feed, we might want to be less strict about confidence
+            db_query = db_query.filter(models.Lead.confidence_score >= 0.5)
+        else:
+            # Normal search results should be more reliable
+            db_query = db_query.filter(models.Lead.confidence_score >= 1.0)
+
         # 1. Location Filtering
         if location:
             if location.lower() == "kenya":
                 db_query = db_query.filter(or_(
                     models.Lead.location_raw.ilike("%Kenya%"),
-                    models.Lead.location_raw == "Unknown"
+                    models.Lead.location_raw == "Unknown",
+                    models.Lead.location_raw == None
                 ))
             else:
                 db_query = db_query.filter(models.Lead.location_raw.ilike(f"%{location}%"))
-        else:
-            db_query = db_query.filter(or_(
-                models.Lead.location_raw.ilike("%Kenya%"),
-                models.Lead.location_raw == "Unknown"
-            ))
-
+        
         # 2. Time Filtering
-        max_age_threshold = datetime.now() - timedelta(days=4)
-        db_query = db_query.filter(models.Lead.created_at >= max_age_threshold)
+        if not live: # For live feed, show everything from last 4 days by default, but allow live toggle
+            max_age_threshold = datetime.now() - timedelta(days=4)
+            db_query = db_query.filter(models.Lead.created_at >= max_age_threshold)
 
         if hours:
             time_threshold = datetime.now() - timedelta(hours=hours)
@@ -425,8 +495,7 @@ def search_leads(
                 db_query = db_query.filter(models.Lead.deal_probability >= min_prob)
 
         # 4. Authenticity Threshold
-        # Relaxed for initial discovery
-        db_query = db_query.filter(models.Lead.confidence_score >= 1.0, models.Lead.is_genuine_buyer == 1)
+        db_query = db_query.filter(models.Lead.is_genuine_buyer == 1)
 
         # 5. Local Advantage Filter
         if local_advantage:
@@ -509,20 +578,30 @@ def search_leads(
 
 @app.post("/search")
 async def trigger_search(query: str, location: str = "Kenya", db: Session = Depends(get_db)):
-    """Trigger background search across platforms, or sync fallback if Redis is down."""
+    """Trigger background search across platforms, or sync fallback if broker is down."""
     if not query:
         raise HTTPException(status_code=400, detail="Query is required")
         
     platforms = ["google", "reddit", "facebook", "tiktok", "twitter"]
     
-    # Check for Redis connectivity
-    redis_available = check_redis()
-    
-    if redis_available:
-        try:
-            from app.core.celery_worker import scrape_platform_task
-            from celery.exceptions import CeleryError
+    # Check for Celery Broker connectivity
+    try:
+        from app.core.celery_worker import celery_app, scrape_platform_task
+        from celery.exceptions import CeleryError
+        
+        broker_url = celery_app.conf.broker_url
+        logger.info(f"Checking broker: {broker_url}")
+        broker_available = False
+        
+        if broker_url.startswith("redis"):
+            broker_available = check_redis()
+        elif "sqlite" in broker_url:
+            broker_available = True # SQLite is always available locally
+        else:
+            broker_available = True # Default to true for other brokers
             
+        logger.info(f"Broker available: {broker_available}")
+        if broker_available:
             task_ids = []
             for platform in platforms:
                 task = scrape_platform_task.delay(platform, query, location)
@@ -532,16 +611,13 @@ async def trigger_search(query: str, location: str = "Kenya", db: Session = Depe
                 "status": "Search initiated in background",
                 "mode": "background",
                 "platforms": platforms,
-                "task_count": len(platforms)
+                "task_count": len(platforms),
+                "broker": "redis" if broker_url.startswith("redis") else "sqlite"
             }
-        except CeleryError as e:
-            logger.error(f"Celery error during task dispatch: {e}")
-            # Fall through to sync fallback
-        except Exception as e:
-            logger.error(f"Redis check passed but delay failed: {e}")
-            # Fall through to sync fallback if delay() fails unexpectedly
+    except Exception as e:
+        logger.error(f"Broker check/dispatch failed: {e}")
     
-    # Synchronous Fallback (Redis is down or failed)
+    # Synchronous Fallback (Broker is down or failed)
     logger.warning(f"Task queue unavailable. Running synchronous fallback search for '{query}'")
     processed = sync_scrape_and_save(query, location, db)
     
@@ -549,7 +625,7 @@ async def trigger_search(query: str, location: str = "Kenya", db: Session = Depe
         "status": "Synchronous search completed",
         "mode": "sync_fallback",
         "processed_count": processed,
-        "warning": "Task queue (Redis) is currently unavailable. Using limited synchronous discovery."
+        "warning": "Task queue (Redis/SQLite) is currently unavailable. Using limited synchronous discovery."
     }
 
 @app.post("/outreach/contact/{lead_id}")

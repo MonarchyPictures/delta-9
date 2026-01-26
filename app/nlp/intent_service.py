@@ -138,17 +138,22 @@ class BuyingIntentNLP:
         text_lower = text.lower()
         
         # 1. Keyword match (Strong intent signals)
-        high_intent = ["looking for", "want to buy", "buying", "need to purchase", "searching for", "where can i find", "anyone selling"]
-        medium_intent = ["price for", "how much is", "cost of", "recommendations for", "best place for"]
+        high_intent = ["looking for", "want to buy", "buying", "need to purchase", "searching for", "where can i find", "anyone selling", "recommend", "where can i buy"]
+        medium_intent = ["price for", "how much is", "cost of", "recommendations for", "best place for", "who has", "where is"]
         
+        # Social media specific intent signals
+        social_intent = ["pls assist", "help me find", "anyone know where", "kindly suggest", "where to get"]
+        if any(si in text_lower for si in social_intent):
+            score += 0.3
+
         for pattern in high_intent:
             if pattern in text_lower:
-                score += 0.4
-                break # Count only once
+                score += 0.5 # Increased from 0.4
+                break 
                 
         for pattern in medium_intent:
             if pattern in text_lower:
-                score += 0.2
+                score += 0.3 # Increased from 0.2
                 break
         
         # 2. Urgency check
@@ -164,7 +169,19 @@ class BuyingIntentNLP:
         if re.search(r'\b\d+\s*(kg|liters|l|units|pieces|pcs|ksh|sh)\b', text_lower):
             score += 0.2
             
-        return min(score, 1.0)
+        # 5. Length penalty/bonus
+        # Very short snippets (less than 30 chars) are often noise
+        if len(text_lower) < 30:
+            # If it has a high intent keyword, don't penalize as much
+            if any(p in text_lower for p in high_intent):
+                score -= 0.1
+            else:
+                score -= 0.3
+        # Medium length snippets are often better
+        elif 50 < len(text_lower) < 300:
+            score += 0.1
+
+        return max(0.0, min(score, 1.0))
 
     def analyze_intent_extensions(self, text):
         """Extract quantity, payment methods, etc."""

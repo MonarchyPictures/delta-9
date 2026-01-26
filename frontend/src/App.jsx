@@ -9,6 +9,8 @@ import Radar from './views/Radar';
 
 const App = () => {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [notifications, setNotifications] = useState([]);
 
   // Initial settings fetch from backend
   useEffect(() => {
@@ -16,7 +18,7 @@ const App = () => {
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
     const fetchInitialSettings = async () => {
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 15000); 
       try {
         const res = await fetch(`${apiUrl}/settings`, {
           signal: controller.signal
@@ -24,15 +26,19 @@ const App = () => {
         clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();
-          if (data && data.notifications_enabled !== undefined) {
-            setNotificationsEnabled(data.notifications_enabled);
+          if (data) {
+            if (data.notifications_enabled !== undefined) {
+              setNotificationsEnabled(data.notifications_enabled);
+            }
+            if (data.sound_enabled !== undefined) {
+              setSoundEnabled(data.sound_enabled);
+            }
           }
         }
       } catch (err) {
         clearTimeout(timeoutId);
-        if (err.name !== 'AbortError') {
-          console.error("Initial settings fetch failed:", err);
-        }
+        if (err.name === 'AbortError' || err.message?.includes('aborted')) return;
+        console.error("Initial settings fetch failed:", err);
       }
     };
     fetchInitialSettings();
@@ -41,7 +47,7 @@ const App = () => {
 
   // Beep sound generator
   const playBeep = () => {
-    if (!notificationsEnabled) return;
+    if (!notificationsEnabled || !soundEnabled) return;
     try {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const oscillator = audioCtx.createOscillator();
@@ -51,8 +57,8 @@ const App = () => {
       gainNode.connect(audioCtx.destination);
 
       oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
-      gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); 
+      gainNode.gain.setValueAtTime(0.05, audioCtx.currentTime);
 
       oscillator.start();
       oscillator.stop(audioCtx.currentTime + 0.1);
@@ -63,66 +69,74 @@ const App = () => {
 
   // Notification Polling (Global)
   useEffect(() => {
-    const controller = new AbortController();
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-    const pollNotifications = async (signal) => {
+    const fetchNotifications = async () => {
       if (!notificationsEnabled) return;
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
       try {
-        const res = await fetch(`${apiUrl}/notifications`, {
-          signal: signal
-        });
-        clearTimeout(timeoutId);
+        const res = await fetch(`${apiUrl}/notifications`);
         if (res.ok) {
-          const newNotifs = await res.json();
-          if (newNotifs.length > 0) {
-            playBeep();
+          const data = await res.json();
+          
+          // Check for new notifications to play sound
+          setNotifications(prev => {
+            const unreadCount = data.filter(n => n.is_read === 0).length;
+            const prevUnreadCount = prev.filter(n => n.is_read === 0).length;
             
-            for (const notif of newNotifs) {
-              const markController = new AbortController();
-              const markTimeoutId = setTimeout(() => markController.abort(), 3000);
-              try {
-                await fetch(`${apiUrl}/notifications/${notif.id}/read`, { 
-                  method: 'POST',
-                  signal: markController.signal
-                });
-                clearTimeout(markTimeoutId);
-              } catch (e) {
-                clearTimeout(markTimeoutId);
-                console.error("Failed to mark notification as read:", e);
-              }
+            if (unreadCount > prevUnreadCount) {
+              playBeep();
             }
-          }
+            return data;
+          });
         }
       } catch (err) {
-        clearTimeout(timeoutId);
-        if (err.name !== 'AbortError') {
-          console.error('Notification poll error:', err);
-        }
+        console.error('Notification poll error:', err);
       }
     };
 
-    const interval = setInterval(() => {
-      const intervalController = new AbortController();
-      pollNotifications(intervalController.signal);
-    }, 10000); // Poll every 10s
-    return () => {
-      controller.abort();
-      clearInterval(interval);
-    };
-  }, [notificationsEnabled]);
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 10000); 
+    return () => clearInterval(interval);
+  }, [notificationsEnabled, soundEnabled]);
+
+  const markAsRead = async (id) => {
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    try {
+      await fetch(`${apiUrl}/notifications/${id}/read`, { method: 'POST' });
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: 1 } : n));
+    } catch (err) {
+      console.error("Failed to mark as read:", err);
+    }
+  };
+
+  const markAllAsRead = async () => {
+    const unread = notifications.filter(n => n.is_read === 0);
+    for (const notif of unread) {
+      markAsRead(notif.id);
+    }
+  };
 
   return (
     <Router>
-      <Layout>
+      <Layout 
+        notifications={notifications} 
+        markAsRead={markAsRead}
+        markAllAsRead={markAllAsRead}
+        notificationsEnabled={notificationsEnabled}
+      >
         <Routes>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/" element={<Radar />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/leads" element={<Leads />} />
           <Route path="/agents" element={<Agents />} />
-          <Route path="/settings" element={<Settings notificationsEnabled={notificationsEnabled} setNotificationsEnabled={setNotificationsEnabled} />} />
-          <Route path="/radar" element={<Radar />} />
-          {/* Fallback */}
+          <Route path="/settings" element={
+            <Settings 
+              notificationsEnabled={notificationsEnabled} 
+              setNotificationsEnabled={setNotificationsEnabled} 
+              soundEnabled={soundEnabled}
+              setSoundEnabled={setSoundEnabled}
+            />
+          } />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>
