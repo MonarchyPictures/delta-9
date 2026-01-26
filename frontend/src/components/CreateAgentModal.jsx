@@ -1,0 +1,266 @@
+import React, { useState } from 'react';
+import { AgentFailedState } from './UXStates';
+import { X, CheckCircle2, Zap, Shield, Cpu, Target, Bell, Globe, Search, Power } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const CreateAgentModal = ({ isOpen, onClose, onSuccess }) => {
+  const [formData, setFormData] = useState({
+    name: '',
+    query: '',
+    location: 'Kenya',
+    is_active: 1,
+    enable_alerts: 1,
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [errors, setErrors] = useState({});
+
+  const validateForm = () => {
+    const newErrors = {};
+    if (!formData.name.trim()) newErrors.name = 'Agent identity is required';
+    if (formData.name.length < 3) newErrors.name = 'Identity must be at least 3 characters';
+    if (!formData.query.trim()) newErrors.query = 'Discovery keywords are required';
+    if (formData.query.length < 3) newErrors.query = 'Keywords must be at least 3 characters';
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!validateForm()) return;
+    
+    setIsSubmitting(true);
+    setHasError(false);
+    
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/agents`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      });
+
+      if (!response.ok) throw new Error('Failed to deploy agent');
+
+      setIsSubmitting(false);
+      setIsSuccess(true);
+      if (onSuccess) onSuccess();
+      setTimeout(() => {
+        setIsSuccess(false);
+        onClose();
+        setFormData({ name: '', query: '', location: 'Kenya', is_active: 1, enable_alerts: 1 });
+      }, 2500);
+    } catch (err) {
+      setIsSubmitting(false);
+      setHasError(true);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-surface-primary border border-surface-secondary w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-bottom-4 duration-300">
+        {isSuccess ? (
+          <div className="p-12 text-center flex flex-col items-center justify-center min-h-[400px]">
+            <div className="w-20 h-20 bg-success/10 rounded-full flex items-center justify-center mb-6 border border-success/20 shadow-lg shadow-success/10">
+              <CheckCircle2 size={40} className="text-success" />
+            </div>
+            <h3 className="text-2xl font-bold text-text-primary mb-2">Agent Successfully Deployed</h3>
+            <p className="text-text-secondary text-sm leading-relaxed max-w-xs mx-auto">
+              Your autonomous agent <span className="text-brand-primary font-bold">{formData.name}</span> is now patrolling the <span className="font-bold text-text-primary">{formData.location}</span> market.
+            </p>
+          </div>
+        ) : hasError ? (
+          <div className="p-8">
+            <AgentFailedState onRetry={() => setHasError(false)} />
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="flex flex-col">
+            {/* Modal Header */}
+            <div className="px-8 py-6 border-b border-surface-secondary flex justify-between items-center bg-surface-primary">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-brand-primary/10 rounded-xl">
+                  <Cpu size={24} className="text-brand-primary" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-text-primary leading-tight">Configure AI Agent</h2>
+                  <p className="text-xs text-text-tertiary font-medium">Define parameters for autonomous lead discovery</p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={onClose} 
+                className="p-2 text-text-tertiary hover:text-text-primary hover:bg-surface-secondary rounded-lg transition-all"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-8 space-y-6 max-h-[70vh] overflow-y-auto no-scrollbar">
+              {/* Agent Identity */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Target size={14} className="text-brand-primary" />
+                  <label className="text-[11px] font-bold text-text-secondary uppercase tracking-wider">Agent Identity</label>
+                </div>
+                <input
+                    required
+                    type="text"
+                    placeholder="e.g. Luxury Car Hunter"
+                    className={`w-full bg-surface-secondary border rounded-xl px-4 py-3.5 text-text-primary text-base md:text-sm focus:ring-4 outline-none transition-all placeholder:text-text-tertiary ${
+                      errors.name ? 'border-error focus:ring-error/10' : 'border-surface-tertiary focus:border-brand-primary focus:ring-brand-primary/10'
+                    }`}
+                    value={formData.name}
+                    onChange={(e) => {
+                      setFormData({ ...formData, name: e.target.value });
+                      if (errors.name) setErrors({ ...errors, name: null });
+                    }}
+                  />
+                {errors.name && <p className="text-[10px] font-bold text-error uppercase tracking-wider">{errors.name}</p>}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Geography */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Globe size={14} className="text-brand-primary" />
+                    <label className="text-[11px] font-bold text-text-secondary uppercase tracking-wider">Target Geography</label>
+                  </div>
+                  <div className="relative">
+                    <select
+                      required
+                      className="w-full bg-surface-secondary border border-surface-tertiary rounded-xl px-4 py-3.5 text-text-primary text-base md:text-sm focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/10 outline-none transition-all cursor-pointer appearance-none"
+                      value={formData.location}
+                      onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                    >
+                      <option value="Kenya">Kenya (All)</option>
+                      <option value="Nairobi">Nairobi</option>
+                      <option value="Mombasa">Mombasa</option>
+                      <option value="Kisumu">Kisumu</option>
+                      <option value="Nakuru">Nakuru</option>
+                    </select>
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-text-tertiary">
+                      <Globe size={14} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Search Query */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Search size={14} className="text-brand-primary" />
+                    <label className="text-[11px] font-bold text-text-secondary uppercase tracking-wider">Discovery Keywords</label>
+                  </div>
+                  <input
+                    required
+                    type="text"
+                    placeholder="e.g. Toyota Prado"
+                    className={`w-full bg-surface-secondary border rounded-xl px-4 py-3.5 text-text-primary text-base md:text-sm focus:ring-4 outline-none transition-all placeholder:text-text-tertiary ${
+                      errors.query ? 'border-error focus:ring-error/10' : 'border-surface-tertiary focus:border-brand-primary focus:ring-brand-primary/10'
+                    }`}
+                    value={formData.query}
+                    onChange={(e) => {
+                      setFormData({ ...formData, query: e.target.value });
+                      if (errors.query) setErrors({ ...errors, query: null });
+                    }}
+                  />
+                  {errors.query && <p className="text-[10px] font-bold text-error uppercase tracking-wider">{errors.query}</p>}
+                </div>
+              </div>
+
+              {/* Toggles */}
+              <div className="space-y-4 pt-2">
+                <div className="flex items-center justify-between p-4 bg-surface-secondary/50 rounded-xl border border-surface-tertiary/50">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-surface-primary border border-surface-tertiary flex items-center justify-center">
+                      <Power size={18} className={formData.is_active ? 'text-brand-primary' : 'text-text-tertiary'} />
+                    </div>
+                    <div>
+                      <span className="text-sm font-bold text-text-primary block">Aggressive Discovery</span>
+                      <span className="text-[11px] text-text-tertiary font-medium">Enhanced scanning frequency</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, is_active: formData.is_active === 1 ? 0 : 1 })}
+                    className={`w-12 h-6 rounded-full relative transition-colors duration-300 ${formData.is_active === 1 ? 'bg-brand-primary' : 'bg-surface-tertiary'}`}
+                    role="switch"
+                    aria-checked={formData.is_active === 1}
+                    aria-label="Aggressive Discovery Toggle"
+                  >
+                    <motion.div 
+                      animate={{ x: formData.is_active === 1 ? 26 : 2 }}
+                      transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                      className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm" 
+                    />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between p-4 bg-surface-secondary/50 rounded-xl border border-surface-tertiary/50">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-surface-primary border border-surface-tertiary flex items-center justify-center">
+                      <Bell size={18} className={formData.enable_alerts ? 'text-warning' : 'text-text-tertiary'} />
+                    </div>
+                    <div>
+                      <span className="text-sm font-bold text-text-primary block">Real-time Notifications</span>
+                      <span className="text-[11px] text-text-tertiary font-medium">Instant alerts on lead discovery</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, enable_alerts: formData.enable_alerts ? 0 : 1 })}
+                    className={`w-12 h-6 rounded-full relative transition-colors duration-300 ${formData.enable_alerts === 1 ? 'bg-brand-primary' : 'bg-surface-tertiary'}`}
+                    role="switch"
+                    aria-checked={formData.enable_alerts === 1}
+                    aria-label="Real-time Notifications Toggle"
+                  >
+                    <motion.div 
+                      animate={{ x: formData.enable_alerts === 1 ? 26 : 2 }}
+                      transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                      className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm" 
+                    />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-8 py-6 border-t border-surface-secondary bg-surface-primary flex gap-3">
+              <button 
+                type="button"
+                onClick={onClose}
+                className="flex-1 px-6 py-3.5 text-text-secondary font-bold hover:bg-surface-secondary rounded-xl transition-all border border-surface-secondary"
+              >
+                Cancel
+              </button>
+              <button 
+                disabled={isSubmitting}
+                type="submit"
+                className="flex-[2] bg-brand-primary hover:bg-brand-secondary disabled:opacity-50 text-white font-bold py-3.5 rounded-xl transition-all active:scale-[0.98] shadow-lg shadow-brand-primary/20 flex items-center justify-center gap-2"
+              >
+                {isSubmitting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Deploying...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap size={18} />
+                    <span>Initialize Deployment</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default CreateAgentModal;

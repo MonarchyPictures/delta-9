@@ -1,0 +1,30 @@
+# Core API
+fastapi
+uvicorn[standard]
+pydantic[email]
+python-dotenv
+
+# Database
+sqlalchemy[asyncio]
+asyncpg
+psycopg2-binary
+redis
+celery
+
+# Scraping & Automation
+requests
+beautifulsoup4
+playwright
+scrapy
+scrapy-playwright
+
+# AI/NLP
+spacy
+transformers
+torch
+sentence-transformers
+
+# Utilities
+geopy
+uuid
+python-multipart
