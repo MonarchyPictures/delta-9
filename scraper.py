@@ -274,11 +274,11 @@ class LeadScraper:
         try:
             # Try the new package name first
             try:
-                from duckduckgo_search import DDGS
-            except ImportError:
                 from ddgs import DDGS
+            except ImportError:
+                from duckduckgo_search import DDGS
         except ImportError:
-            print("Error: duckduckgo_search package not found.")
+            print("Error: duckduckgo_search/ddgs package not found. Please install with 'pip install duckduckgo_search'")
             return []
         
         print(f"DuckDuckGo Search ({source}): {query}")
@@ -287,18 +287,19 @@ class LeadScraper:
         # Try multiple times with increasing delays and query simplification
         for attempt in range(4):
             try:
-                time.sleep(random.uniform(3, 6))
+                # Add a small random delay to avoid rapid-fire requests
+                time.sleep(random.uniform(2, 4))
                 
                 current_query = query
                 # Simplification logic
                 if attempt == 1:
-                    # Remove quotes
-                    current_query = query.replace('"', '')
+                    # Remove quotes and years
+                    current_query = query.replace('"', '').replace('2025', '').replace('2026', '')
                 elif attempt == 2:
                     # Very simple query - just keywords and platform
                     parts = query.split()
                     keywords = " ".join([p for p in parts if not p.startswith("site:") and p.lower() != source.lower()])
-                    current_query = f"{source} {keywords}"
+                    current_query = f"{source} {keywords} {location}"
                 elif attempt == 3:
                     # Pure keywords
                     current_query = query.split('"')[1] if '"' in query else query
@@ -306,21 +307,27 @@ class LeadScraper:
                     current_query = " ".join([p for p in parts if not p.startswith("site:")])
                 
                 with DDGS() as ddgs:
-                    region = 'ke-en' if attempt < 2 else 'wt-wt'
+                    # Use region-specific search if possible
+                    region = 'ke-en' if 'kenya' in location.lower() else 'wt-wt'
+                    
                     # Use 'm' (month) for social sources to get relatively fresh leads
-                    # But not too restrictive that we get 0 results
-                    t_limit = 'm' if source in ["Facebook", "Twitter", "Reddit", "TikTok"] else None
+                    # But if we get nothing, we'll try without time limit in later attempts
+                    t_limit = 'm' if (source in ["Facebook", "Twitter", "Reddit", "TikTok"] and attempt < 2) else None
                     
                     try:
-                        # Use list() to consume generator and handle errors
+                        # Use text search
+                        # The text() method returns a list of dicts with 'title', 'href', 'body'
                         ddg_results = list(ddgs.text(current_query, region=region, max_results=25, timelimit=t_limit))
                     except Exception as e:
                         err_str = str(e).lower()
                         if "202" in err_str or "ratelimit" in err_str or "429" in err_str:
                             print(f"DDG rate limited ({err_str}). Waiting longer...")
-                            time.sleep(random.uniform(20, 35))
+                            time.sleep(random.uniform(15, 25))
                             continue
-                        raise e
+                        
+                        # Handle potential ddgs package issues
+                        print(f"DDG Error on attempt {attempt+1}: {e}")
+                        continue
                     
                     if ddg_results:
                         print(f"DDG found {len(ddg_results)} results for {source}")
@@ -332,7 +339,8 @@ class LeadScraper:
                                 "baidu.com", "zhihu.com", "douban.com", "weibo.com", 
                                 "qq.com", "163.com", "sina.com.cn", "sohu.com",
                                 "amazon.com", "ebay.com", "alibaba.com", "aliexpress.com",
-                                "jumia.co.ke", "kilimall.co.ke" # Exclude marketplaces if we want raw leads
+                                "jumia.co.ke", "kilimall.co.ke", "copia.co.ke",
+                                "/login", "/signup", "robots.txt", "/terms", "/privacy"
                             ]
                             if any(d in href for d in blacklist):
                                 continue
@@ -355,60 +363,22 @@ class LeadScraper:
                                     domain_netloc = parsed_link.netloc.lower()
                                     path = parsed_link.path.lower()
                                     
-                                    # Even more relaxed domain matching - if it's in the URL anywhere
                                     is_allowed_domain = any(ad in domain_netloc for ad in allowed_domains)
                                     if not is_allowed_domain:
-                                        # Try matching the whole URL if netloc fails (some proxies/weird URLs)
                                         is_allowed_domain = any(ad in href for ad in allowed_domains)
                                     
                                     if not is_allowed_domain:
                                         continue
                                         
-                                    # EXCLUDE common non-post pages (RELAXED)
-                                    noise = ["/login", "/signup", "robots.txt", "/terms", "/privacy", "/help/", "/support/", "index.php", "home=", "about.fb.com", "business.facebook.com", "/directory/", "/policies/"]
+                                    # EXCLUDE common noise pages
+                                    noise = ["/help/", "/support/", "index.php", "home=", "about.fb.com", "business.facebook.com", "/directory/", "/policies/", "/legal/"]
                                     if any(n in path for n in noise):
                                         continue
                                         
                                     # EXCLUDE top-level and utility pages
-                                    if path in ["/", "", "/home", "/explore", "/facebook/", "/twitter/", "/reddit/"]:
-                                        continue
-                                    if domain_netloc in ["l.facebook.com", "m.me"]:
+                                    if path in ["/", "", "/home", "/explore", "/facebook/", "/twitter/", "/reddit/", "/login/", "/signup/"]:
                                         continue
                                         
-                                    # INCLUDE patterns for specific platforms - EXTREMELY RELAXED
-                                    is_valid = False
-                                    if source == "Facebook":
-                                        # Include almost any Facebook link that isn't login/signup/noise
-                                        if any(p in path for p in ["/groups/", "/posts/", "/permalink/", "/marketplace/", "/story.php", "/photo.php", "/p/", "/events/"]):
-                                            is_valid = True
-                                        elif len(path.strip('/')) > 3: # Relaxed: profiles can be short
-                                            is_valid = True
-                                    elif source == "Twitter":
-                                        if any(p in path for p in ["/status/", "/hashtag/", "/events/", "/i/"]):
-                                            is_valid = True
-                                        elif len(path.strip('/')) > 3: # Likely a profile
-                                            is_valid = True
-                                    elif source == "Reddit":
-                                        if any(p in path for p in ["/r/", "/user/", "/comments/"]):
-                                            is_valid = True
-                                        elif len(path.strip('/')) > 3:
-                                            is_valid = True
-                                    elif source == "TikTok":
-                                        if any(p in path for p in ["/video/", "/@", "/discover/"]):
-                                            is_valid = True
-                                        elif len(path.strip('/')) > 3:
-                                            is_valid = True
-                                    else:
-                                        is_valid = True
-                                        
-                                    if not is_valid:
-                                        # If it's a social link but didn't match patterns, 
-                                        # we'll still keep it if it has some depth
-                                        if len(path.strip('/')) > 2:
-                                            is_valid = True
-                                        else:
-                                            print(f"Skipping {source} link due to path: {path}")
-                                            continue
                                 except:
                                     if not any(ad in href for ad in allowed_domains):
                                         continue
@@ -439,12 +409,11 @@ class LeadScraper:
     def search_reddit(self, keywords, location="Kenya"):
         """Search Reddit for recent posts matching keywords in Kenya."""
         print(f"Reddit Search: {keywords}")
-        # Use keyword-based targeting instead of site: for better reliability
+        # Use simpler queries for better recall
         queries = [
-            f'Reddit {keywords} {location} "recommend"',
-            f'Reddit {keywords} {location} "where to buy"',
-            f'Reddit {keywords} {location} "anyone selling"',
-            f'site:reddit.com/r/Kenya "{keywords}"'
+            f'site:reddit.com "{keywords}" {location}',
+            f'Reddit {keywords} {location} "buying"',
+            f'site:reddit.com/r/Kenya {keywords}'
         ]
         
         all_results = []
@@ -466,13 +435,11 @@ class LeadScraper:
     def search_facebook(self, keywords, location="Kenya"):
         """Search Facebook public posts and marketplace in Kenya."""
         print(f"Facebook Search: {keywords}")
-        # Focus on groups, marketplace and posts with buyer intent
+        # Use simpler queries for better recall
         queries = [
-            f'Facebook "{keywords}" {location} "anyone selling" "2026"',
-            f'Facebook "{keywords}" {location} "where can i find" "2026"',
-            f'Facebook marketplace "{keywords}" {location} "price"',
-            f'site:facebook.com/groups "{keywords}" {location} "looking for"',
-            f'site:facebook.com/posts "{keywords}" {location} "buy"'
+            f'site:facebook.com "{keywords}" {location}',
+            f'Facebook marketplace {keywords} {location}',
+            f'site:facebook.com/groups {keywords} Kenya'
         ]
         
         all_results = []
@@ -487,12 +454,11 @@ class LeadScraper:
     def search_twitter(self, keywords, location="Kenya"):
         """Search Twitter/X posts in Kenya."""
         print(f"Twitter Search: {keywords}")
-        # Use more specific buyer intent keywords for Twitter
+        # Use simpler queries for better recall
         queries = [
-            f'Twitter "{keywords}" {location} "buying" "2026"',
-            f'Twitter "{keywords}" {location} "where to buy"',
-            f'Twitter "{keywords}" {location} "anyone know where"',
-            f'site:twitter.com "{keywords}" {location} "help me find"'
+            f'site:twitter.com "{keywords}" {location}',
+            f'Twitter {keywords} {location} "buying"',
+            f'site:twitter.com "{keywords}" Kenya'
         ]
         
         all_results = []

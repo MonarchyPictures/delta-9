@@ -29,10 +29,11 @@ const Leads = () => {
 
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-      let url = `${apiUrl}/leads/search?limit=50`;
+      // Default to live leads if no specific search query
+      let url = `${apiUrl}/leads/search?limit=50&live=true`;
       
       if (view === 'saved') {
-        url += `&is_saved=true`;
+        url = `${apiUrl}/leads/search?limit=50&is_saved=true`;
       } else {
         if (query) url += `&query=${encodeURIComponent(query)}`;
         if (radius) url += `&radius=${encodeURIComponent(radius)}`;

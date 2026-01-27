@@ -36,11 +36,15 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Buying Intent Radar API")
 
-# CORS Configuration - Restricted for security
-allowed_origins = os.getenv(
-    "CORS_ALLOWED_ORIGINS", 
-    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:3001"
-).split(",")
+# CORS Configuration - Permissive for development
+allowed_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+]
 
 app.add_middleware(
     CORSMiddleware,
