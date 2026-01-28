@@ -8,6 +8,7 @@ const NotificationDropdown = ({
   onClose, 
   onMarkAsRead, 
   onMarkAllAsRead,
+  onClearAll,
   isOpen 
 }) => {
   const navigate = useNavigate();
@@ -66,6 +67,15 @@ const NotificationDropdown = ({
                   title="Mark all as read"
                 >
                   <Check size={16} />
+                </button>
+              )}
+              {notifications.length > 0 && (
+                <button 
+                  onClick={onClearAll}
+                  className="p-2 hover:bg-white/5 rounded-lg transition-colors text-white/40 hover:text-red-500"
+                  title="Clear all notifications"
+                >
+                  <Trash2 size={16} />
                 </button>
               )}
               <button 

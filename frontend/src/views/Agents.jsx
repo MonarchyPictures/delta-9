@@ -7,80 +7,55 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const Agents = ({ onCreateAgent, notificationsEnabled, setNotificationsEnabled }) => {
-  const [agents, setAgents] = useState([]);
-  const [loading, setLoading] = useState(true);
+const Agents = ({ 
+  onCreateAgent, 
+  notificationsEnabled, 
+  setNotificationsEnabled,
+  agents,
+  setAgents,
+  loading,
+  fetchAgents
+}) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
   const [celeryStatus, setCeleryStatus] = useState('up');
 
+  const checkHealth = async () => {
+    const requestController = new AbortController();
+    const timeoutId = setTimeout(() => requestController.abort(), 3000);
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+      const res = await fetch(`${apiUrl}/health`, {
+        signal: requestController.signal
+      });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const data = await res.json();
+        setCeleryStatus(data.services?.celery || 'up');
+      }
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') return;
+      console.warn("Health check failed:", err);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchAgents(true);
+    await checkHealth();
+    setIsRefreshing(false);
+  };
+
   useEffect(() => {
-    const controller = new AbortController();
-    let isMounted = true;
-    let interval;
-
-    const checkHealth = async () => {
-      const requestController = new AbortController();
-      const timeoutId = setTimeout(() => requestController.abort(), 3000);
-      try {
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-        const res = await fetch(`${apiUrl}/health`, {
-          signal: requestController.signal
-        });
-        clearTimeout(timeoutId);
-        if (res.ok) {
-          const data = await res.json();
-          if (isMounted) {
-            setCeleryStatus(data.services?.celery || 'up');
-          }
-        }
-      } catch (err) {
-        clearTimeout(timeoutId);
-        console.warn("Health check failed:", err);
-      }
-    };
-
-    const fetchAgents = async (isSilent = false) => {
-      if (!isSilent) setLoading(true);
-      setIsRefreshing(true);
-      
-      const requestController = new AbortController();
-      const timeoutId = setTimeout(() => requestController.abort(), 5000);
-      
-      try {
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-        const res = await fetch(`${apiUrl}/agents`, {
-          signal: requestController.signal
-        });
-        clearTimeout(timeoutId);
-        if (res.ok && isMounted) {
-          const data = await res.json();
-          setAgents(Array.isArray(data) ? data : []);
-        }
-      } catch (err) {
-        clearTimeout(timeoutId);
-        if (err.name === 'AbortError') return;
-        console.error(err);
-      } finally {
-        if (isMounted) {
-          if (!isSilent) setLoading(false);
-          setIsRefreshing(false);
-        }
-      }
-    };
-
     checkHealth();
-    fetchAgents();
     
-    // Refresh agents every 30 seconds
-    interval = setInterval(() => {
-      fetchAgents(true);
+    // Refresh health status every 30 seconds
+    const interval = setInterval(() => {
       checkHealth();
     }, 30000);
 
     return () => {
-      isMounted = false;
-      controller.abort();
       if (interval) clearInterval(interval);
     };
   }, []);
@@ -90,7 +65,7 @@ const Agents = ({ onCreateAgent, notificationsEnabled, setNotificationsEnabled }
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
       const res = await fetch(`${apiUrl}/agents/${id}`, { 
         method: 'DELETE',
         signal: controller.signal
@@ -121,7 +96,8 @@ const Agents = ({ onCreateAgent, notificationsEnabled, setNotificationsEnabled }
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/agents/${agent.id}`, {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+      const res = await fetch(`${apiUrl}/agents/${agent.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enable_alerts: newStatus }),
@@ -200,7 +176,7 @@ const Agents = ({ onCreateAgent, notificationsEnabled, setNotificationsEnabled }
               <h1 className="text-4xl font-black text-gray-900 tracking-tight italic uppercase">
                 My Agents
               </h1>
-              <p className="text-gray-500 text-sm font-medium max-w-xl">
+              <p className="text-black text-sm font-medium max-w-xl">
                 Manage your autonomous discovery agents and monitoring nodes.
               </p>
             </div>
@@ -219,7 +195,7 @@ const Agents = ({ onCreateAgent, notificationsEnabled, setNotificationsEnabled }
             </button>
 
             <div className="flex items-center gap-3 px-4 py-2 bg-gray-50 rounded-xl border border-gray-100">
-              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Notifications</span>
+              <span className="text-[10px] font-bold text-black uppercase tracking-widest">Notifications</span>
               <button
                 onClick={toggleGlobalNotifications}
                 className={`w-10 h-5 rounded-full relative transition-colors duration-300 ${notificationsEnabled ? 'bg-green-500' : 'bg-gray-300'}`}
@@ -235,7 +211,7 @@ const Agents = ({ onCreateAgent, notificationsEnabled, setNotificationsEnabled }
               <button 
                 onClick={(e) => {
                   e.stopPropagation();
-                  fetchAgents(true);
+                  handleRefresh();
                 }}
                 className="p-2 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-white transition-all"
                 title="Refresh Status"
@@ -281,7 +257,7 @@ const Agents = ({ onCreateAgent, notificationsEnabled, setNotificationsEnabled }
               <Users size={48} />
             </div>
             <h3 className="text-2xl font-black text-gray-900 uppercase tracking-tight italic">No Discovery Nodes</h3>
-            <p className="text-gray-500 text-sm font-medium mb-10 max-w-sm text-center">
+            <p className="text-black text-sm font-medium mb-10 max-w-sm text-center">
               Your fleet is currently offline. Deploy your first autonomous agent to begin real-time lead discovery.
             </p>
             <button 
@@ -404,19 +380,19 @@ const AgentCard = React.forwardRef(({ agent, viewMode, onDelete, onToggleAlerts,
           </div>
           <div className="flex flex-col min-w-[200px]">
             <h3 className="text-gray-900 font-black text-base uppercase tracking-tight leading-none italic group-hover:text-blue-600 transition-colors">{agent.name}</h3>
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1 italic truncate max-w-[300px]">Query: {agent.query}</span>
+            <span className="text-[10px] font-bold text-black uppercase tracking-widest mt-1 italic truncate max-w-[300px]">Query: {agent.query}</span>
           </div>
           <div className="hidden lg:flex items-center gap-2 px-4 py-2 bg-gray-50 rounded-xl border border-gray-100 group-hover:border-blue-100 transition-colors">
             <Globe size={12} className="text-blue-600" />
-            <span className="text-[10px] font-bold text-gray-600 uppercase tracking-widest">{agent.location}</span>
+            <span className="text-[10px] font-bold text-black uppercase tracking-widest">{agent.location}</span>
           </div>
           <div className="hidden xl:flex items-center gap-4">
             <div className="flex flex-col items-center group/stat">
-              <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest group-hover/stat:text-blue-600 transition-colors">Signals</span>
+              <span className="text-[8px] font-bold text-black uppercase tracking-widest group-hover/stat:text-blue-600 transition-colors">Signals</span>
               <span className="text-sm font-black text-gray-900 italic">{agent.signals_count || 0}</span>
             </div>
             <div className="flex flex-col items-center group/stat">
-              <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest group-hover/stat:text-blue-600 transition-colors">Status</span>
+              <span className="text-[8px] font-bold text-black uppercase tracking-widest group-hover/stat:text-blue-600 transition-colors">Status</span>
               <div className="flex items-center gap-1">
                 <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse" />
                 <span className="text-[10px] font-bold text-green-600 uppercase tracking-widest">Active</span>
@@ -504,7 +480,10 @@ const AgentCard = React.forwardRef(({ agent, viewMode, onDelete, onToggleAlerts,
                 <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
                 <span className="text-[9px] font-bold text-green-600 uppercase tracking-widest">Active</span>
               </div>
-              <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Patrolling {agent.location}</span>
+              <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Patrolling {agent.location} ({agent.radius}km)</span>
+            </div>
+            <div className="text-[9px] font-black text-blue-600/60 uppercase tracking-widest mt-1">
+              Min Confidence: {agent.min_intent_score * 100}%
             </div>
           </div>
         </div>
@@ -550,14 +529,14 @@ const AgentCard = React.forwardRef(({ agent, viewMode, onDelete, onToggleAlerts,
       {/* Metrics Section */}
       <div className="grid grid-cols-2 gap-4 relative z-10">
         <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 flex flex-col gap-1 group/stat hover:border-blue-100 transition-colors">
-          <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5 group-hover/stat:text-blue-600 transition-colors">
+          <span className="text-[9px] font-bold text-black uppercase tracking-widest flex items-center gap-1.5 group-hover/stat:text-blue-600 transition-colors">
             <BarChart3 size={10} />
             Signals Found
           </span>
           <span className="text-lg font-black text-gray-900 italic group-hover/stat:text-blue-600 transition-colors">{agent.signals_count || 0}</span>
         </div>
         <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 flex flex-col gap-1 group/stat hover:border-blue-100 transition-colors">
-          <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5 group-hover/stat:text-blue-600 transition-colors">
+          <span className="text-[9px] font-bold text-black uppercase tracking-widest flex items-center gap-1.5 group-hover/stat:text-blue-600 transition-colors">
             <Clock size={10} />
             Uptime
           </span>
@@ -579,7 +558,7 @@ const AgentCard = React.forwardRef(({ agent, viewMode, onDelete, onToggleAlerts,
       {/* Contact/Query Section */}
       <div className="space-y-4 relative z-10">
         <div className="flex flex-col gap-2">
-          <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Active Discovery Query</span>
+          <span className="text-[9px] font-bold text-black uppercase tracking-widest">Active Discovery Query</span>
           <div className="bg-gray-900 text-gray-100 px-4 py-3 rounded-xl font-mono text-[10px] flex items-center justify-between group/code">
             <span className="truncate mr-2">"{agent.query}"</span>
             <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />

@@ -28,8 +28,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("radar_api.log")
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
@@ -63,6 +62,21 @@ expander = KeywordExpander()
 ranker = RankingEngine()
 detector = DuplicateDetector()
 
+@app.delete("/leads/{lead_id}")
+def delete_lead(lead_id: str, db: Session = Depends(get_db)):
+    try:
+        lead = db.query(models.Lead).filter(models.Lead.id == lead_id).first()
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        db.delete(lead)
+        db.commit()
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting lead: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete lead")
+
 @app.get("/health")
 def health_check():
     """System health check including Redis/Celery status and system metrics."""
@@ -85,12 +99,17 @@ def health_check():
         # Fast check: Is the broker reachable?
         if broker_url.startswith("redis"):
             if check_redis():
-                health["services"]["celery"] = "up"
+                health["services"]["celery"] = "up (Redis)"
             else:
-                health["services"]["celery"] = "down"
-                health["status"] = "degraded"
-        elif "sqlite" in broker_url:
-            health["services"]["celery"] = "up (fallback)"
+                # If redis failed, it might have fallen back to sqla
+                from app.core.celery_worker import FALLBACK_BROKER_URL
+                if celery_app.conf.broker_url == FALLBACK_BROKER_URL:
+                    health["services"]["celery"] = "up (SQLite Fallback)"
+                else:
+                    health["services"]["celery"] = "down"
+                    health["status"] = "degraded"
+        elif "sqlite" in broker_url or "sqla" in broker_url:
+            health["services"]["celery"] = "up (SQLite)"
         else:
             health["services"]["celery"] = "up"
     except Exception as e:
@@ -104,9 +123,9 @@ def check_redis():
     import socket
     from urllib.parse import urlparse
     
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    redis_url = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
     url = urlparse(redis_url)
-    host = url.hostname or "localhost"
+    host = url.hostname or "127.0.0.1"
     port = url.port or 6379
     
     try:
@@ -167,11 +186,12 @@ def sync_scrape_and_save(query: str, location: str, db: Session):
                     contact_email=normalized.get("contact_email"),
                     intent_score=normalized["intent_score"],
                     confidence_score=normalized["confidence_score"],
+                    intent_type=normalized.get("intent_type", "BUYER"),
                     is_contact_verified=normalized.get("is_contact_verified", 0),
                     contact_reliability_score=normalized.get("contact_reliability_score", 0.0),
                     is_genuine_buyer=normalized.get("is_genuine_buyer", 1),
                     verification_badges=normalized.get("verification_badges", []),
-                    status=models.ContactStatus.NOT_CONTACTED,
+                    status=models.CRMStatus.NEW,
                     created_at=datetime.now()
                 )
                 db.add(lead)
@@ -291,6 +311,8 @@ class AgentSchema(BaseModel):
     name: str
     query: str
     location: str = "Kenya"
+    radius: int = 50
+    min_intent_score: float = 0.7
     is_active: int = 1
     enable_alerts: int = 1
     signals_count: int = 0
@@ -388,23 +410,127 @@ def update_lead(lead_id: str, data: LeadUpdateSchema, db: Session = Depends(get_
     return {"status": "success", "lead_id": lead_id}
 
 @app.get("/notifications", response_model=List[NotificationSchema])
-def get_notifications(db: Session = Depends(get_db)):
+def list_notifications(db: Session = Depends(get_db)):
+    """List all notifications."""
     try:
-        # Return all notifications, ordered by created_at desc
-        return db.query(models.Notification).order_by(models.Notification.created_at.desc()).all()
+        notifications = db.query(models.Notification).order_by(models.Notification.created_at.desc()).all()
+        return notifications
     except Exception as e:
         logger.error(f"Error fetching notifications: {e}")
         return []
 
 @app.get("/settings")
 def get_settings(db: Session = Depends(get_db)):
-    """Get all system settings."""
+    """Fetch current system settings."""
     try:
         settings = db.query(models.SystemSetting).all()
-        return {s.key: s.value for s in settings}
+        result = {}
+        for s in settings:
+            # Handle boolean strings/values from DB
+            val = s.value
+            if isinstance(val, str):
+                if val.lower() == 'true': val = True
+                elif val.lower() == 'false': val = False
+            result[s.key] = val
+            
+        # Ensure defaults if not in DB
+        if "notifications_enabled" not in result: result["notifications_enabled"] = True
+        if "sound_enabled" not in result: result["sound_enabled"] = True
+        
+        return result
     except Exception as e:
         logger.error(f"Error fetching settings: {e}")
-        return {}
+        return {"notifications_enabled": True, "sound_enabled": True}
+
+@app.post("/settings")
+def update_settings(settings: dict, db: Session = Depends(get_db)):
+    """Update system settings."""
+    try:
+        for key, value in settings.items():
+            setting = db.query(models.SystemSetting).filter(models.SystemSetting.key == key).first()
+            if setting:
+                setting.value = value
+            else:
+                setting = models.SystemSetting(key=key, value=value)
+                db.add(setting)
+        db.commit()
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Error updating settings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update settings")
+
+def generate_synthetic_leads(query: str, location: str, db: Session):
+    """Generate AI-inferred demand signals based on historical patterns."""
+    try:
+        forecaster = DemandForecaster(db)
+        # Find similar categories if the exact query yields nothing
+        trends = forecaster.get_market_trends(days=30)
+        
+        synthetic = []
+        
+        # Look for categories that match the query
+        matching_categories = [cat for cat in trends.keys() if query.lower() in cat.lower()]
+        
+        for cat in matching_categories[:3]:
+            stats = forecaster.predict_demand_spikes(cat)
+            if stats.get("status") != "insufficient_data":
+                synthetic.append({
+                    "id": f"synthetic-{uuid.uuid4().hex[:8]}",
+                    "product_category": cat,
+                    "buyer_request_snippet": f"High likelihood demand detected for {cat} in {location}. {stats.get('current_demand', 5)} people recently searched for this.",
+                    "location_raw": location,
+                    "intent_score": 0.85,
+                    "readiness_level": "AI-INFERRED",
+                    "confidence_score": 0.9,
+                    "is_genuine_buyer": 1,
+                    "timestamp": datetime.now(),
+                    "is_synthetic": True,
+                    "metadata": stats
+                })
+        
+        # If still nothing, look for emerging markets
+        if not synthetic:
+            emerging = forecaster.get_emerging_markets()
+            for market in emerging[:2]:
+                synthetic.append({
+                    "id": f"synthetic-{uuid.uuid4().hex[:8]}",
+                    "product_category": "Trending Market",
+                    "buyer_request_snippet": f"Rapidly increasing demand signal in {market['location']}. Activity up by {market['growth_index']}x.",
+                    "location_raw": market['location'],
+                    "intent_score": 0.8,
+                    "readiness_level": "AI-INFERRED",
+                    "confidence_score": 0.85,
+                    "is_genuine_buyer": 1,
+                    "timestamp": datetime.now(),
+                    "is_synthetic": True
+                })
+                
+        return synthetic
+    except Exception as e:
+        logger.error(f"Error generating synthetic leads: {e}")
+        return []
+
+@app.patch("/leads/{lead_id}/status")
+def update_lead_status(lead_id: str, status: str, db: Session = Depends(get_db)):
+    """Update CRM status of a lead."""
+    try:
+        lead = db.query(models.Lead).filter(models.Lead.id == lead_id).first()
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        
+        # Validate status
+        try:
+            lead.status = models.CRMStatus(status.lower())
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+            
+        db.commit()
+        return {"status": "success", "new_status": lead.status.value}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating lead status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update status")
 
 @app.get("/leads/search")
 def search_leads(
@@ -417,12 +543,15 @@ def search_leads(
     hours: Optional[int] = None,
     readiness: Optional[str] = None,
     min_prob: Optional[float] = None,
-    live: bool = False,
-    verified_only: bool = True,
-    smart_match: bool = True,
+    live: bool = Query(True),
+    verified_only: bool = Query(False),
+    smart_match: bool = Query(True),
     local_advantage: bool = False,
     is_saved: Optional[bool] = None,
     hot_only: bool = False,
+    buyer_only: bool = Query(True),
+    has_whatsapp: Optional[bool] = None,
+    status: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -435,6 +564,13 @@ def search_leads(
         # Category Filter
         if category and category.lower() != "all":
             db_query = db_query.filter(models.Lead.product_category.ilike(f"%{category}%"))
+
+        # Buyer Only Filter (Strict Intent Classifier)
+        if buyer_only:
+            # ENFORCEMENT: Only show leads marked as genuine buyers with high intent
+            db_query = db_query.filter(models.Lead.is_genuine_buyer == 1)
+            # Threshold for intent: No guessing. Must be at least 0.4 (WARM) or higher
+            db_query = db_query.filter(models.Lead.intent_score >= 0.4)
 
         # Radius Filter (Simplistic: filter by lead's radius_km if provided)
         if radius and radius.lower() != "anywhere":
@@ -449,6 +585,17 @@ def search_leads(
             db_query = db_query.filter(models.Lead.intent_score >= 0.7)
             db_query = db_query.filter(models.Lead.readiness_level.in_(["HOT"]))
 
+        # WhatsApp Filter
+        if has_whatsapp is not None:
+            if has_whatsapp:
+                db_query = db_query.filter(models.Lead.contact_phone != None)
+            else:
+                db_query = db_query.filter(models.Lead.contact_phone == None)
+        
+        # CRM Status Filter
+        if status and status.lower() != "all":
+            db_query = db_query.filter(models.Lead.status == models.CRMStatus(status.lower()))
+
         # Saved Leads Filter
         if is_saved is not None:
             db_query = db_query.filter(models.Lead.is_saved == (1 if is_saved else 0))
@@ -458,14 +605,14 @@ def search_leads(
             db_query = db_query.filter(models.Lead.is_contact_verified == 1)
             db_query = db_query.filter(models.Lead.contact_reliability_score >= 10)
         
-        # Live Feed Logic: Order by detection time (created_at) if live
+        # Live Feed Logic: Order by detection time (timestamp) if live
         if live:
-            db_query = db_query.order_by(models.Lead.created_at.desc())
+            db_query = db_query.order_by(models.Lead.timestamp.desc())
             # For live feed, we might want to be less strict about confidence
-            db_query = db_query.filter(models.Lead.confidence_score >= 0.5)
+            db_query = db_query.filter(models.Lead.confidence_score >= 0.1) # Relaxed from 0.5
         else:
             # Normal search results should be more reliable
-            db_query = db_query.filter(models.Lead.confidence_score >= 1.0)
+            db_query = db_query.filter(models.Lead.confidence_score >= 0.5) # Relaxed from 1.0
 
         # 1. Location Filtering
         if location:
@@ -481,11 +628,11 @@ def search_leads(
         # 2. Time Filtering
         if not live: # For live feed, show everything from last 4 days by default, but allow live toggle
             max_age_threshold = datetime.now() - timedelta(days=4)
-            db_query = db_query.filter(models.Lead.created_at >= max_age_threshold)
+            db_query = db_query.filter(models.Lead.timestamp >= max_age_threshold)
 
         if hours:
             time_threshold = datetime.now() - timedelta(hours=hours)
-            db_query = db_query.filter(models.Lead.created_at >= time_threshold)
+            db_query = db_query.filter(models.Lead.timestamp >= time_threshold)
 
         # 3. Hyper-Specific Filters
         if readiness:
@@ -499,7 +646,8 @@ def search_leads(
                 db_query = db_query.filter(models.Lead.deal_probability >= min_prob)
 
         # 4. Authenticity Threshold
-        db_query = db_query.filter(models.Lead.is_genuine_buyer == 1)
+        if not live: # Relax authenticity for live feed fallbacks
+            db_query = db_query.filter(models.Lead.is_genuine_buyer == 1)
 
         # 5. Local Advantage Filter
         if local_advantage:
@@ -507,12 +655,23 @@ def search_leads(
 
         # 6. Query Filtering
         if query:
-            filters = [
-                models.Lead.product_category.ilike(f"%{query}%"),
-                models.Lead.buyer_request_snippet.ilike(f"%{query}%"),
-                models.Lead.neighborhood.ilike(f"%{query}%")
-            ]
-            db_query = db_query.filter(or_(*filters))
+            query_words = [w.strip() for w in query.lower().split() if len(w.strip()) > 2]
+            if query_words:
+                word_filters = []
+                for word in query_words:
+                    word_filters.append(models.Lead.product_category.ilike(f"%{word}%"))
+                    word_filters.append(models.Lead.buyer_request_snippet.ilike(f"%{word}%"))
+                    word_filters.append(models.Lead.neighborhood.ilike(f"%{word}%"))
+                
+                # Use OR for query words to broaden results, but weight them in ranking if possible
+                # For now, just ensure at least one word matches
+                db_query = db_query.filter(or_(*word_filters))
+            else:
+                # Fallback for very short queries
+                db_query = db_query.filter(or_(
+                    models.Lead.product_category.ilike(f"%{query}%"),
+                    models.Lead.buyer_request_snippet.ilike(f"%{query}%")
+                ))
         
         # 7. Ranking & Pagination
         offset = (page - 1) * limit
@@ -522,53 +681,67 @@ def search_leads(
                 db_query = db_query.order_by(
                     models.Lead.match_score.desc(),
                     models.Lead.deal_probability.desc(),
-                    models.Lead.created_at.desc()
+                    models.Lead.timestamp.desc()
                 )
             else:
                 db_query = db_query.order_by(
                     models.Lead.contact_reliability_score.desc(),
-                    models.Lead.created_at.desc()
+                    models.Lead.timestamp.desc()
                 )
+        else:
+            db_query = db_query.order_by(models.Lead.timestamp.desc())
         
         leads = db_query.offset(offset).limit(limit).all()
         
-        # RELAXED FALLBACK: If no results found, try with relaxed filters
-        if not leads and query:
-            logger.info(f"No leads found for '{query}' with strict filters. Retrying with relaxed filters...")
+        # MULTI-STAGE FALLBACK: If no results found, expand search parameters
+        search_status = "STRICT"
+        if not leads and not is_saved:
+            logger.info(f"No leads found for '{query}' with strict filters. Starting expansion...")
+            
+            # Stage 1: Expand Time (4 days -> 30 days)
+            search_status = "EXPANDED_TIME"
             relaxed_query = db.query(models.Lead)
+            if query:
+                filters = [models.Lead.product_category.ilike(f"%{query}%"), models.Lead.buyer_request_snippet.ilike(f"%{query}%")]
+                relaxed_query = relaxed_query.filter(or_(*filters))
             
-            # Filter 1: Basic Location
-            if location:
-                if location.lower() == "kenya":
-                    relaxed_query = relaxed_query.filter(or_(
-                        models.Lead.location_raw.ilike("%Kenya%"),
-                        models.Lead.location_raw == "Unknown"
-                    ))
-                else:
-                    relaxed_query = relaxed_query.filter(or_(
-                        models.Lead.location_raw.ilike(f"%{location}%"),
-                        models.Lead.location_raw == "Unknown"
-                    ))
-            
-            # Filter 2: Basic Query
-            filters = [
-                models.Lead.product_category.ilike(f"%{query}%"),
-                models.Lead.buyer_request_snippet.ilike(f"%{query}%")
-            ]
-            relaxed_query = relaxed_query.filter(or_(*filters))
-            
-            # Filter 3: Lower Confidence Threshold (anything above 1.0)
-            relaxed_query = relaxed_query.filter(models.Lead.confidence_score >= 1.0)
-            
-            # Sort by creation date to show newest first
+            # For expanded time, we still want somewhat recent leads
+            max_age_threshold = datetime.now() - timedelta(days=60)
+            relaxed_query = relaxed_query.filter(models.Lead.created_at >= max_age_threshold)
             leads = relaxed_query.order_by(models.Lead.created_at.desc()).offset(offset).limit(limit).all()
-            logger.info(f"Relaxed search found {len(leads)} potential signals.")
+            
+            # Stage 2: Relax Location & Confidence & Category (Keyword partial match)
+            if not leads:
+                search_status = "RELAXED_LOCATION"
+                relaxed_query = db.query(models.Lead)
+                if query:
+                    # Search for any word in the query
+                    query_words = query.split()
+                    word_filters = []
+                    for word in query_words:
+                        if len(word) > 2:
+                            word_filters.append(models.Lead.product_category.ilike(f"%{word}%"))
+                            word_filters.append(models.Lead.buyer_request_snippet.ilike(f"%{word}%"))
+                    
+                    if word_filters:
+                        relaxed_query = relaxed_query.filter(or_(*word_filters))
+                
+                # Broaden confidence
+                relaxed_query = relaxed_query.filter(models.Lead.confidence_score >= 0.1)
+                leads = relaxed_query.order_by(models.Lead.created_at.desc()).offset(offset).limit(limit).all()
+
+            # Stage 3: AI-Inferred Leads (DISABLED per user request)
+            if not leads and query:
+                search_status = "NO_RESULTS"
+                logger.info(f"No live leads found for '{query}'. AI expansion disabled.")
+                leads = []
 
         return {
             "results": leads,
             "count": len(leads),
             "page": page,
-            "limit": limit
+            "limit": limit,
+            "search_status": search_status
         }
     except Exception as e:
         logger.error(f"Error searching leads: {e}")
@@ -592,6 +765,10 @@ async def trigger_search(query: str, location: str = "Kenya", db: Session = Depe
     try:
         from app.core.celery_worker import celery_app, scrape_platform_task
         from celery.exceptions import CeleryError
+        from app.nlp.keyword_expansion import KeywordExpander
+        
+        expander = KeywordExpander()
+        expanded_keywords = expander.expand_keywords(query, top_k=2) # Only 2 to avoid overwhelming
         
         broker_url = celery_app.conf.broker_url
         logger.info(f"Checking broker: {broker_url}")
@@ -606,17 +783,22 @@ async def trigger_search(query: str, location: str = "Kenya", db: Session = Depe
             
         logger.info(f"Broker available: {broker_available}")
         if broker_available:
-            task_ids = []
-            for platform in platforms:
-                task = scrape_platform_task.delay(platform, query, location)
-                task_ids.append(task.id)
+            from app.core.celery_worker import specialops_mission_task
+            
+            # MASTER AGENT: Trigger autonomous SpecialOps mission
+            task = specialops_mission_task.delay(query, location)
+            
+            # Optional: Also trigger expanded keyword missions for higher coverage
+            for kw in expanded_keywords:
+                if kw.lower() != query.lower():
+                    specialops_mission_task.delay(kw, location)
                 
             return {
-                "status": "Search initiated in background",
-                "mode": "background",
-                "platforms": platforms,
-                "task_count": len(platforms),
-                "broker": "redis" if broker_url.startswith("redis") else "sqlite"
+                "status": "SpecialOps Mission Initiated",
+                "mode": "autonomous",
+                "agent": "specialops",
+                "task_id": task.id,
+                "query": query
             }
     except Exception as e:
         logger.error(f"Broker check/dispatch failed: {e}")
@@ -708,6 +890,8 @@ def create_agent(agent: AgentSchema, db: Session = Depends(get_db)):
             name=agent.name,
             query=agent.query,
             location=agent.location,
+            radius=agent.radius,
+            min_intent_score=agent.min_intent_score,
             is_active=agent.is_active,
             enable_alerts=agent.enable_alerts
         )
@@ -795,6 +979,17 @@ def mark_notification_read(notif_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Error marking notification as read: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.delete("/notifications/clear")
+def clear_all_notifications(db: Session = Depends(get_db)):
+    """Delete all notifications."""
+    try:
+        db.query(models.Notification).delete()
+        db.commit()
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Error clearing notifications: {e}")
+        raise HTTPException(status_code=500, detail="Failed to clear notifications")
 
 # --- SETTINGS ENDPOINTS ---
 

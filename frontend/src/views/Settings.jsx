@@ -24,34 +24,39 @@ const Settings = ({ notificationsEnabled, setNotificationsEnabled, soundEnabled,
 
   React.useEffect(() => {
     const controller = new AbortController();
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+    let isMounted = true;
 
-    const fetchHealth = async (signal) => {
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const fetchHealth = async () => {
+      const requestController = new AbortController();
+      const timeoutId = setTimeout(() => requestController.abort(), 10000);
+      
       try {
         const res = await fetch(`${apiUrl}/health`, {
-          signal: signal
+          signal: requestController.signal
         });
         clearTimeout(timeoutId);
-        if (res.ok) {
+        if (res.ok && isMounted) {
           const data = await res.json();
           setHealth(data);
         }
       } catch (err) {
         clearTimeout(timeoutId);
-        if (err.name === 'AbortError' || err.message?.includes('aborted')) return;
+        if (err.name === 'AbortError' || !isMounted) return;
         console.error("Health fetch failed:", err);
       }
     };
 
-    const fetchSettings = async (signal) => {
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const fetchSettings = async () => {
+      const requestController = new AbortController();
+      const timeoutId = setTimeout(() => requestController.abort(), 10000);
+
       try {
         const res = await fetch(`${apiUrl}/settings`, {
-          signal: signal
+          signal: requestController.signal
         });
         clearTimeout(timeoutId);
-        if (res.ok) {
+        if (res.ok && isMounted) {
           const data = await res.json();
           if (data) {
             setUiPreferences(prev => ({
@@ -71,17 +76,16 @@ const Settings = ({ notificationsEnabled, setNotificationsEnabled, soundEnabled,
         }
       } catch (err) {
         clearTimeout(timeoutId);
-        if (err.name === 'AbortError' || err.message?.includes('aborted')) return;
+        if (err.name === 'AbortError' || !isMounted) return;
         console.error("Settings fetch failed:", err);
       }
     };
 
-    fetchHealth(controller.signal);
-    fetchSettings(controller.signal);
-    const interval = setInterval(() => {
-      fetchHealth(controller.signal);
-    }, 10000);
+    fetchHealth();
+    fetchSettings();
+    const interval = setInterval(fetchHealth, 10000);
     return () => {
+      isMounted = false;
       controller.abort();
       clearInterval(interval);
     };
@@ -92,7 +96,7 @@ const Settings = ({ notificationsEnabled, setNotificationsEnabled, soundEnabled,
     setSaveStatus(null);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8000);
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
     try {
       // Save all settings including UI preferences
@@ -345,8 +349,8 @@ const Settings = ({ notificationsEnabled, setNotificationsEnabled, soundEnabled,
                 />
                 <StatusItem 
                   label="Task Queue" 
-                  value={health?.services?.celery === 'up' ? 'Redis Connected' : 'Redis Offline'} 
-                  status={health?.services?.celery === 'up' ? 'success' : 'warning'} 
+                  value={health?.services?.celery?.includes('up') ? health.services.celery : 'Redis Offline'} 
+                  status={health?.services?.celery?.includes('up') ? 'success' : 'warning'} 
                 />
                 <StatusItem 
                   label="Memory Usage" 

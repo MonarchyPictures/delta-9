@@ -13,21 +13,28 @@ const Radar = () => {
     const controller = new AbortController();
 
     const fetchLiveLeads = async () => {
+      const requestController = new AbortController();
+      const timeoutId = setTimeout(() => requestController.abort(), 30000);
+
       try {
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
         const res = await fetch(`${apiUrl}/leads/search?live=true&limit=15&verified_only=false`, {
-          signal: controller.signal
+          signal: requestController.signal
         });
-        const data = await res.json();
-        if (isMounted) {
-          setLiveLeads(data.results || []);
-          setIsLiveLoading(false);
+        
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted) {
+            setLiveLeads(data.results || []);
+            setIsLiveLoading(false);
+          }
         }
       } catch (err) {
-        if (err.name !== 'AbortError') {
-          console.error("Failed to fetch live leads:", err);
-          if (isMounted) setIsLiveLoading(false);
-        }
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError' || !isMounted) return;
+        console.error("Failed to fetch live leads:", err);
+        if (isMounted) setIsLiveLoading(false);
       }
     };
 

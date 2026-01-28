@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { X, Phone, MessageSquare, Bookmark, ExternalLink, MapPin, Clock, Flame, ShieldCheck, Send, CheckCircle2 } from 'lucide-react';
+import { X, Phone, MessageSquare, Bookmark, ExternalLink, MapPin, Clock, Flame, ShieldCheck, Send, CheckCircle2, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const LeadDetail = ({ lead, onClose, onSave, onUpdate }) => {
+const LeadDetail = ({ lead, onClose, onSave, onDelete, onUpdate }) => {
   const [note, setNote] = useState(lead.notes || '');
   const [status, setStatus] = useState(lead.status || 'not_contacted');
   const [isUpdating, setIsUpdating] = useState(false);
@@ -66,9 +66,23 @@ const LeadDetail = ({ lead, onClose, onSave, onUpdate }) => {
               {getIntentLabel(lead.intent_score)} Intent
             </span>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-lg transition-colors text-white/40 hover:text-white">
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-2">
+            {onDelete && (
+              <button 
+                onClick={() => {
+                  onDelete(lead.id);
+                  onClose();
+                }}
+                className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-white/40 hover:text-red-500"
+                title="Discard Lead"
+              >
+                <Trash2 size={20} />
+              </button>
+            )}
+            <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-lg transition-colors text-white/40 hover:text-white">
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-col md:flex-row h-[70vh] overflow-hidden">

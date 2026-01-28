@@ -16,6 +16,17 @@ class LeadValidator:
     def normalize_lead(self, raw_data, db=None):
         """Transform raw platform data into a normalized Lead object."""
         text = raw_data.get("text", "")
+        
+        # 1. Classify intent strictly
+        classification = self.nlp.classify_intent(text)
+        
+        # ABSOLUTE RULE: DISCARD IF NOT BUYER
+        if classification != "BUYER":
+            import logging
+            logger = logging.getLogger("radar_api")
+            logger.info(f"Normalization discarded lead: Classification is {classification}. Text: {text[:100]}")
+            return None # DISCARD IMMEDIATELY
+            
         entities = self.nlp.extract_entities(text)
         intent_score = self.nlp.calculate_intent_score(text)
         
@@ -47,7 +58,7 @@ class LeadValidator:
         # Authenticity & Verification
         phone = self._extract_phone(text)
         email = self._extract_email(text)
-        social_link = raw_data.get("link")
+        social_link = raw_data.get("link") or raw_data.get("url")
         
         # Contact Verification & Reliability
         is_phone_v, phone_meta = self.verifier.verify_phone(phone) if phone else (False, {})
@@ -58,8 +69,7 @@ class LeadValidator:
         phone_to_save = phone_meta.get("clean_number", phone) if is_phone_v else phone
         email_to_save = email.lower() if email else email
 
-        # Strict Filtering: Must have at least one contact method
-        # We allow social links even if not "verified" by external API as long as they exist
+        # RELAXED Filtering: If it's a social lead (Reddit/Facebook), the link IS the contact method
         platform = raw_data.get("source", "Unknown")
         is_social = platform.lower() in ["facebook", "twitter", "reddit", "tiktok", "instagram"]
         
@@ -71,7 +81,8 @@ class LeadValidator:
             return None # Drop leads with zero working contact methods
             
         # Social Filtering: Require some intent for social posts to avoid homepages/landing pages
-        if is_social and intent_score < 0.35: # Increased from 0.2 to be more selective
+        # Relaxed threshold to ensure "No Signals Detected" is minimized
+        if is_social and intent_score < 0.15: # Lowered from 0.25 to catch more leads
             logger.info(f"Normalization dropped {platform} lead: Low intent score ({intent_score}). Link: {social_link}")
             return None
             
@@ -123,6 +134,7 @@ class LeadValidator:
             "latitude": lat,
             "longitude": lon,
             "buyer_request_snippet": text[:500],
+            "intent_type": classification,
             "product_category": product_for_market,
             "buyer_name": buyer_name,
             "intent_score": intent_score,
@@ -412,18 +424,25 @@ class LeadValidator:
             if "high_intent" not in badges: badges.append("high_intent")
 
         # 4. Scammer/Reseller Filtering (REVERSE SIGNAL)
-        seller_keywords = ["available", "selling", "dm for price", "we have", "wholesale", "stock", "delivery available"]
-        # Relax for chicken feed as many buyers look for suppliers directly
-        is_chicken_feed = "chicken feed" in text.lower() or "poultry" in text.lower()
+        # ENFORCEMENT: If ANY seller signal is detected, it is NOT genuine.
+        seller_keywords = [
+            "for sale", "selling", "available", "price", "discount", "offer", 
+            "promo", "delivery", "in stock", "we sell", "shop", "dealer", 
+            "supplier", "warehouse", "order now", "dm for price", 
+            "call / whatsapp", "our store", "brand new", "limited stock",
+            "flash sale", "retail price", "wholesale", "best price",
+            "check out", "visit us", "located at", "we deliver", "buy from us",
+            "contact for price", "special offer", "new arrival", "stockist"
+        ]
         
-        if any(kw in text.lower() for kw in seller_keywords):
-            if not is_chicken_feed:
-                score -= 5
-                is_genuine = False # Likely a reseller, not a lead
-            else:
-                score -= 2 # Small penalty but keep genuine
-                is_genuine = True
-            
+        # Check if it's a buyer question first (exception)
+        buyer_questions = ["who sells", "anyone selling", "who is selling", "who has", "where can i find"]
+        is_buyer_question = any(bq in text.lower() for bq in buyer_questions)
+        
+        if any(kw in text.lower() for kw in seller_keywords) and not is_buyer_question:
+            score -= 8 # Heavy penalty
+            is_genuine = False 
+        
         # 5. Activity/Freshness
         # For new leads, we assume they are active
         badges.append("active_buyer")

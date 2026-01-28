@@ -3,24 +3,147 @@ import time
 import asyncio
 import random
 import requests
+import os
 from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
+
+from duckduckgo_search import DDGS
 
 class LeadScraper:
     def __init__(self):
         self.user_agents = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Edge/121.0.0.0",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:123.0) Gecko/20100101 Firefox/123.0",
-            "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0",
-            "Mozilla/5.0 (iPad; CPU OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Mobile/15E148 Safari/604.1"
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
         ]
+        # Intent-driven search templates for higher signal-to-noise
+        # REWRITTEN: Focus exclusively on buyer phrases, remove seller-bait (price, available)
+        self.intent_templates = [
+            '"{query}" "looking for" {location}',
+            '"{query}" "where can i buy" {location}',
+            '"{query}" "anyone selling" {location}',
+            '"{query}" "recommendations" {location}',
+            '"{query}" "need" {location}',
+            '"{query}" "urgent" {location}',
+            '"{query}" "natafuta" {location}',
+            '"{query}" "nahitaji" {location}'
+        ]
+
+    def duckduckgo_search(self, query, location="Kenya", source="DuckDuckGo", max_results=15):
+        """Search DuckDuckGo with improved query handling, retries, and intent expansion."""
+        print(f"DuckDuckGo Search ({source}): {query} in {location}")
+        
+        # 1. Expand query with intent templates for better signal
+        search_queries = [f"{query} {location}"]
+        # Only expand if it's not already a specific site search
+        if "site:" not in query:
+             # Add a few intent-heavy variations
+             templates = random.sample(self.intent_templates, 2)
+             for t in templates:
+                 search_queries.append(t.format(query=query, location=location))
+
+        all_results = []
+        
+        try:
+            with DDGS() as ddgs:
+                for sq in search_queries:
+                    print(f"Executing expanded query: {sq}")
+                    
+                    # Try multiple times for each expanded query
+                    for attempt in range(2):
+                        try:
+                            time.sleep(random.uniform(1.5, 3))
+                            region = 'ke-en' if 'kenya' in location.lower() else 'wt-wt'
+                            
+                            # Use 'm' (month) for social sources to get fresh leads
+                            t_limit = 'm' if source in ["Facebook", "Twitter", "Reddit", "TikTok"] else None
+                            
+                            ddg_results = list(ddgs.text(sq, region=region, max_results=max_results, timelimit=t_limit))
+                            
+                            if ddg_results:
+                                for r in ddg_results:
+                                    href = r['href'].lower()
+                                    
+                                    # Filtering
+                                    blacklist = ["amazon.com", "ebay.com", "alibaba.com", "jumia.co.ke", "/login", "/signup"]
+                                    if any(d in href for d in blacklist): continue
+
+                                    # Platform filtering
+                                    if source not in ["Google", "DuckDuckGo", "Bing"]:
+                                        platforms = {
+                                            "Facebook": ["facebook.com", "fb.com"],
+                                            "Reddit": ["reddit.com"],
+                                            "TikTok": ["tiktok.com"],
+                                            "Twitter": ["twitter.com", "x.com"]
+                                        }
+                                        allowed = platforms.get(source, [])
+                                        if allowed and not any(ad in href for ad in allowed): continue
+
+                                    all_results.append({
+                                        "source": source,
+                                        "link": r['href'],
+                                        "text": f"{r['title']} - {r['body']}",
+                                        "category": "General",
+                                        "user": "Social Post" if source not in ["Google", "Bing"] else "Web Result",
+                                        "location": location
+                                    })
+                                break # Success for this query
+                        except Exception as e:
+                            print(f"DDG Error on attempt {attempt+1} for {sq}: {e}")
+                            time.sleep(5)
+            
+            # 2. Fallback to Bing if DDG failed completely
+            if not all_results and source != "Bing":
+                print(f"DDG failed for {source}. Trying Bing fallback...")
+                return self.bing_search(query, location, source=source)
+
+            return all_results
+        except Exception as e:
+            print(f"DuckDuckGo engine error: {e}")
+            return []
+
+    def serpapi_search(self, query, location="Kenya", source="Google"):
+        """
+        Premium search using SerpApi (highly recommended for production).
+        To use: 
+        1. Get an API key from https://serpapi.com/
+        2. Set it in your .env as SERPAPI_KEY
+        """
+        api_key = os.getenv("SERPAPI_KEY")
+        if not api_key:
+            print("SerpApi key not found. Falling back to DuckDuckGo.")
+            return self.duckduckgo_search(query, location, source)
+            
+        print(f"SerpApi Search ({source}): {query}")
+        url = "https://serpapi.com/search"
+        params = {
+            "q": query,
+            "location": location,
+            "hl": "en",
+            "gl": "ke",
+            "google_domain": "google.com",
+            "api_key": api_key
+        }
+        
+        try:
+            response = requests.get(url, params=params)
+            data = response.json()
+            results = []
+            
+            for r in data.get("organic_results", []):
+                results.append({
+                    "source": source,
+                    "link": r.get("link"),
+                    "text": f"{r.get('title')} - {r.get('snippet')}",
+                    "category": "General",
+                    "user": "Web Result",
+                    "location": location
+                })
+            return results
+        except Exception as e:
+            print(f"SerpApi error: {e}")
+            return self.duckduckgo_search(query, location, source)
 
     def _get_browser_context(self, playwright):
         # Use a random user agent for each session
@@ -470,32 +593,64 @@ class LeadScraper:
                 
         return all_results
 
-    def scrape_platform(self, platform, keywords, location="Kenya"):
-        """Entry point for scraping different platforms."""
+    def google_search_direct(self, query, location="Kenya", source="Google", max_results=20):
+        """
+        Direct Google search using googlesearch-python.
+        """
+        from googlesearch import search
+        print(f"Direct Google Search: {query} in {location}")
+        results = []
         try:
-            platform_lower = platform.lower()
-            if platform_lower == "google":
-                # Very simple query for Google to avoid detection
-                query = f"{keywords} {location}"
-                return self.google_search(query, location)
-            elif platform_lower == "reddit":
-                return self.search_reddit(keywords, location)
-            elif platform_lower == "tiktok":
-                return self.search_tiktok(keywords, location)
-            elif platform_lower == "facebook":
-                return self.search_facebook(keywords, location)
-            elif platform_lower == "twitter":
-                return self.search_twitter(keywords, location)
-            elif platform_lower == "bing":
-                query = f'"{keywords}" {location}'
-                return self.bing_search(query, location, source="Bing")
-            else:
-                # Default to Bing search for unknown platforms
-                query = f'site:{platform_lower}.com "{keywords}" {location}'
-                return self.bing_search(query, location, source=platform.capitalize())
+            # Search query construction - use explicit buyer intent
+            # We combine multiple variations to increase volume
+            intent_variations = [
+                f"{query} {location} \"looking for\"",
+                f"{query} {location} \"need\"",
+                f"{query} {location} \"where to buy\"",
+                f"{query} {location} \"natafuta\""
+            ]
+            
+            for q in intent_variations:
+                print(f"Direct Google variation: {q}")
+                try:
+                    for url in search(q, num_results=max_results // 2, lang="en"):
+                        if url not in [r['link'] for r in results]:
+                            results.append({
+                                "source": "Google",
+                                "link": url,
+                                "text": f"Google Result for {query}",
+                                "category": "General",
+                                "user": "Web Result",
+                                "location": location
+                            })
+                except Exception as ve:
+                    print(f"Variation error: {ve}")
+                    continue
+                    
+            return results
         except Exception as e:
-            print(f"Error scraping {platform}: {e}")
+            print(f"Google direct search error: {e}")
             return []
+
+    def scrape_platform(self, platform, query, location="Kenya", radius=50):
+        """
+        Main entry point for scraping.
+        """
+        print(f"Scraping {platform} for '{query}' in {location}...")
+        
+        # 1. Try SerpApi if key exists
+        if os.getenv("SERPAPI_KEY"):
+            return self.serpapi_search(query, location, source=platform.capitalize())
+            
+        # 2. Multi-source selection
+        if platform.lower() == "google":
+            # Combine DDG Google results and Direct Google
+            ddg_g = self.duckduckgo_search(query, location, source="Google")
+            direct_g = self.google_search_direct(query, location, source="Google")
+            return ddg_g + direct_g
+            
+        # 3. Default to DDG for social platforms
+        return self.duckduckgo_search(query, location, source=platform.capitalize())
 
 if __name__ == "__main__":
     scraper = LeadScraper()

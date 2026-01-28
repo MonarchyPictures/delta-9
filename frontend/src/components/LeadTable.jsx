@@ -27,7 +27,7 @@ const LeadTable = ({ leads, autoOpenId = null, onModalClose = () => {} }) => {
   const handleEngage = async (e, lead) => {
     e.stopPropagation();
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
       await fetch(`${apiUrl}/outreach/contact/${lead.id}`, {
         method: 'POST',
       });

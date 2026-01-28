@@ -11,6 +11,14 @@ class ContactStatus(enum.Enum):
     CONVERTED = "converted"
     REJECTED = "rejected"
 
+class CRMStatus(enum.Enum):
+    NEW = "new"
+    CONTACTED = "contacted"
+    REPLIED = "replied"
+    NEGOTIATING = "negotiating"
+    CONVERTED = "converted"
+    DEAD = "dead"
+
 class Lead(Base):
     __tablename__ = "leads"
 
@@ -26,6 +34,7 @@ class Lead(Base):
     radius_km = Column(Float, default=0.0)
     
     # Intent Data
+    intent_type = Column(String, default="UNKNOWN", index=True) # BUYER, SELLER, UNCLEAR, UNKNOWN
     buyer_request_snippet = Column(String)
     product_category = Column(String, index=True)
     buyer_name = Column(String)
@@ -82,6 +91,10 @@ class Lead(Base):
     conversion_rate = Column(Float, default=0.0)
     non_response_flag = Column(Integer, default=0) # 1 if lead has history of non-response
     
+    # NEW: Special Ops & WhatsApp Ready
+    is_hot_lead = Column(Integer, default=0) # 1 if score >= 85
+    whatsapp_ready_data = Column(JSON) # Stores formatted output
+    
     # Verification & Badges
     verification_badges = Column(JSON) # ["verified_contact", "active_buyer", "high_intent"]
     account_age_days = Column(Integer)
@@ -113,7 +126,7 @@ class Lead(Base):
     social_links = Column(JSON)
     
     # Metadata
-    status = Column(Enum(ContactStatus), default=ContactStatus.NOT_CONTACTED)
+    status = Column(Enum(CRMStatus), default=CRMStatus.NEW)
     is_saved = Column(Integer, default=0) # 1 if saved for follow-up
     notes = Column(String)
     personalized_message = Column(String)
@@ -136,6 +149,8 @@ class Agent(Base):
     name = Column(String)
     query = Column(String)
     location = Column(String, default="Kenya")
+    radius = Column(Integer, default=50) # Discovery radius in km
+    min_intent_score = Column(Float, default=0.7) # Minimum intent score to accept
     is_active = Column(Integer, default=1)
     enable_alerts = Column(Integer, default=1) # New: enable real-time alerts
     last_run = Column(DateTime)

@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Broker configuration with fallback to SQLite for local development
-BROKER_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+BROKER_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
 # If no redis is found, we'll use SQLAlchemy as a fallback broker
 # This allows the app to run without a separate Redis instance
 FALLBACK_BROKER_URL = "sqla+sqlite:///celery_broker.db"
@@ -51,6 +51,109 @@ celery_app.conf.update(
     },
 )
 
+@celery_app.task(name="specialops_mission_task")
+def specialops_mission_task(query: str, location: str = "Kenya", agent_id: int = None):
+    """
+    MASTER AGENT MISSION: Autonomous web intelligence routing.
+    Follows the SpecialOps decision logic for search, crawl, and extraction.
+    """
+    from app.core.specialops import SpecialOpsAgent
+    from app.utils.normalization import LeadValidator
+    from app.nlp.duplicate_detector import DuplicateDetector
+    
+    agent_ops = SpecialOpsAgent()
+    validator = LeadValidator()
+    detector = DuplicateDetector()
+    
+    logger.info(f"Starting SpecialOps Mission: {query} in {location}")
+    
+    # 1. Execute Mission
+    try:
+        mission_results = agent_ops.execute_mission(query, location)
+    except Exception as e:
+        logger.error(f"SpecialOps Mission Failed: {e}")
+        return f"Mission error: {e}"
+    
+    db = SessionLocal()
+    processed_count = 0
+    
+    try:
+        # Fetch recent leads for duplicate detection
+        recent_leads = db.query(models.Lead).filter(
+            models.Lead.timestamp >= datetime.now() - timedelta(hours=24)
+        ).all()
+        recent_texts = [l.buyer_request_snippet for l in recent_leads if l.buyer_request_snippet]
+
+        for result in mission_results:
+            try:
+                # Prepare for normalization
+                raw = {
+                    "source": result.get("source", "specialops"),
+                    "link": result.get("url"),
+                    "text": result.get("data", {}).get("raw_text", "") or result.get("text", ""),
+                    "title": result.get("data", {}).get("title", ""),
+                    "location": location
+                }
+                
+                normalized = validator.normalize_lead(raw, db=db)
+                if not normalized:
+                    continue
+                
+                # Duplicate Detection
+                snippet = normalized.get("buyer_request_snippet", "")
+                if snippet and detector.is_duplicate(snippet, recent_texts):
+                    continue
+
+                # Create lead record
+                lead = models.Lead(
+                    id=normalized["id"],
+                    source_platform=normalized["source_platform"],
+                    post_link=normalized["post_link"],
+                    timestamp=normalized.get("timestamp", datetime.now()),
+                    location_raw=normalized.get("location_raw"),
+                    latitude=normalized.get("latitude"),
+                    longitude=normalized.get("longitude"),
+                    buyer_request_snippet=normalized["buyer_request_snippet"],
+                    product_category=normalized["product_category"],
+                    buyer_name=normalized.get("buyer_name", "Anonymous"),
+                    intent_score=normalized["intent_score"],
+                    confidence_score=normalized["confidence_score"],
+                    readiness_level=normalized.get("readiness_level"),
+                    urgency_score=normalized.get("urgency_score"),
+                    budget_info=normalized.get("budget_info"),
+                    product_specs=normalized.get("product_specs"),
+                    deal_probability=normalized.get("deal_probability"),
+                    intent_type=normalized.get("intent_type", "BUYER"),
+                    
+                    # NEW: Special Ops Fields
+                    is_hot_lead=1 if result.get("is_hot_lead") else 0,
+                    whatsapp_ready_data=result.get("whatsapp_ready"),
+                    
+                    # Contact Verification
+                    is_contact_verified=normalized.get("is_contact_verified", 0),
+                    contact_reliability_score=normalized.get("contact_reliability_score", 0.0),
+                    preferred_contact_method=normalized.get("preferred_contact_method")
+                )
+                
+                db.merge(lead)
+                processed_count += 1
+                if snippet:
+                    recent_texts.append(snippet)
+                
+            except Exception as e:
+                logger.error(f"Error processing SpecialOps lead: {e}")
+                continue
+                
+        db.commit()
+        logger.info(f"SpecialOps Mission Complete: Found {processed_count} high-confidence leads.")
+        return f"Processed {processed_count} leads via SpecialOps"
+        
+    except Exception as e:
+        logger.error(f"Error in SpecialOps task: {e}")
+        return f"Error: {e}"
+    finally:
+        db.close()
+
 @celery_app.task(name="run_all_agents")
 def run_all_agents():
     """Trigger all active agents to run their searches."""
@@ -67,7 +170,7 @@ def run_all_agents():
         db.close()
 
 @celery_app.task(name="scrape_platform_task")
-def scrape_platform_task(platform: str, query: str, location: str = "Kenya", agent_id: int = None):
+def scrape_platform_task(platform: str, query: str, location: str = "Kenya", agent_id: int = None, radius: int = 50, min_intent: float = 0.7):
     """Background task to scrape a platform and save leads."""
     from scraper import LeadScraper
     from app.utils.normalization import LeadValidator
@@ -89,7 +192,8 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
     
     # 2. Scrape
     try:
-        raw_results = scraper.scrape_platform(platform.lower(), query, location)
+        # Pass radius to scraper if supported
+        raw_results = scraper.scrape_platform(platform.lower(), query, location, radius=radius)
     except Exception as e:
         logger.error(f"Scraper failed for {platform}: {e}")
         return f"Scraper error on {platform}"
@@ -119,6 +223,11 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
                 if not normalized:
                     continue # Skip leads that fail strict contact verification
                 
+                # Check Min Intent Score from Agent
+                if normalized.get("intent_score", 0) < min_intent:
+                    logger.info(f"Skipping lead due to low intent score: {normalized.get('intent_score')} < {min_intent}")
+                    continue
+
                 # 3. Duplicate Detection
                 if detector.is_duplicate(normalized["buyer_request_snippet"], recent_texts):
                     logger.info(f"Skipping duplicate lead from {platform}: {normalized['buyer_request_snippet'][:50]}...")
@@ -168,6 +277,7 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
                     budget_info=normalized.get("budget_info"),
                     product_specs=normalized.get("product_specs"),
                     deal_probability=normalized.get("deal_probability"),
+                    intent_type=normalized.get("intent_type", "BUYER"),
                     
                     # NEW: Smart Matching
                     match_score=normalized.get("match_score", 0.0),
@@ -275,7 +385,14 @@ def run_agent_task(agent_id: int):
         
         platforms = ["google", "facebook", "reddit", "tiktok", "twitter"]
         for platform in platforms:
-            scrape_platform_task.delay(platform, agent.query, agent.location, agent.id)
+            scrape_platform_task.delay(
+                platform, 
+                agent.query, 
+                agent.location, 
+                agent.id,
+                radius=agent.radius,
+                min_intent=agent.min_intent_score
+            )
             
         # Update last run timestamp
         agent.last_run = datetime.now()

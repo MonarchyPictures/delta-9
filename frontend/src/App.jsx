@@ -6,25 +6,62 @@ import Leads from './views/Leads';
 import Agents from './views/Agents';
 import Settings from './views/Settings';
 import Radar from './views/Radar';
+import CreateAgentModal from './components/CreateAgentModal';
 
 const App = () => {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [notifications, setNotifications] = useState([]);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [agents, setAgents] = useState([]);
+  const [loadingAgents, setLoadingAgents] = useState(false);
+
+  const fetchAgents = async (isSilent = false) => {
+    if (!isSilent) setLoadingAgents(true);
+    
+    const requestController = new AbortController();
+    const timeoutId = setTimeout(() => requestController.abort(), 20000);
+    
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+      const res = await fetch(`${apiUrl}/agents`, {
+        signal: requestController.signal
+      });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const data = await res.json();
+        setAgents(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') return;
+      console.error("Fetch agents error:", err);
+    } finally {
+      if (!isSilent) setLoadingAgents(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAgents();
+    const interval = setInterval(() => fetchAgents(true), 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Initial settings fetch from backend
   useEffect(() => {
-    const controller = new AbortController();
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    let isMounted = true;
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
     const fetchInitialSettings = async () => {
-      const timeoutId = setTimeout(() => controller.abort(), 15000); 
+      const requestController = new AbortController();
+      const timeoutId = setTimeout(() => requestController.abort(), 10000); 
+      
       try {
         const res = await fetch(`${apiUrl}/settings`, {
-          signal: controller.signal
+          signal: requestController.signal
         });
         clearTimeout(timeoutId);
-        if (res.ok) {
+        if (res.ok && isMounted) {
           const data = await res.json();
           if (data) {
             if (data.notifications_enabled !== undefined) {
@@ -37,12 +74,14 @@ const App = () => {
         }
       } catch (err) {
         clearTimeout(timeoutId);
-        if (err.name === 'AbortError' || err.message?.includes('aborted')) return;
+        if (err.name === 'AbortError' || !isMounted) return;
         console.error("Initial settings fetch failed:", err);
       }
     };
     fetchInitialSettings();
-    return () => controller.abort();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Beep sound generator
@@ -69,38 +108,48 @@ const App = () => {
 
   // Notification Polling (Global)
   useEffect(() => {
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    let isMounted = true;
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
     const fetchNotifications = async () => {
-      if (!notificationsEnabled) return;
+      const requestController = new AbortController();
+      const timeoutId = setTimeout(() => requestController.abort(), 10000);
+
       try {
-        const res = await fetch(`${apiUrl}/notifications`);
-        if (res.ok) {
+        const res = await fetch(`${apiUrl}/notifications`, {
+          signal: requestController.signal
+        });
+        clearTimeout(timeoutId);
+        if (res.ok && isMounted) {
           const data = await res.json();
           
-          // Check for new notifications to play sound
           setNotifications(prev => {
             const unreadCount = data.filter(n => n.is_read === 0).length;
             const prevUnreadCount = prev.filter(n => n.is_read === 0).length;
             
-            if (unreadCount > prevUnreadCount) {
+            if (notificationsEnabled && soundEnabled && unreadCount > prevUnreadCount) {
               playBeep();
             }
             return data;
           });
         }
       } catch (err) {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError' || !isMounted) return;
         console.error('Notification poll error:', err);
       }
     };
 
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 10000); 
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchNotifications, 15000); 
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [notificationsEnabled, soundEnabled]);
 
   const markAsRead = async (id) => {
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
     try {
       await fetch(`${apiUrl}/notifications/${id}/read`, { method: 'POST' });
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: 1 } : n));
@@ -116,19 +165,46 @@ const App = () => {
     }
   };
 
+  const clearNotifications = async () => {
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+    try {
+      const res = await fetch(`${apiUrl}/notifications/clear`, { method: 'DELETE' });
+      if (res.ok) {
+        setNotifications([]);
+      }
+    } catch (err) {
+      console.error("Failed to clear notifications:", err);
+    }
+  };
+
+  const handleCreateAgent = () => {
+    setIsCreateModalOpen(true);
+  };
+
   return (
     <Router>
       <Layout 
         notifications={notifications} 
         markAsRead={markAsRead}
         markAllAsRead={markAllAsRead}
+        clearNotifications={clearNotifications}
         notificationsEnabled={notificationsEnabled}
       >
         <Routes>
           <Route path="/" element={<Radar />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/leads" element={<Leads />} />
-          <Route path="/agents" element={<Agents />} />
+          <Route path="/agents" element={
+            <Agents 
+              onCreateAgent={handleCreateAgent} 
+              notificationsEnabled={notificationsEnabled}
+              setNotificationsEnabled={setNotificationsEnabled}
+              agents={agents}
+              setAgents={setAgents}
+              loading={loadingAgents}
+              fetchAgents={fetchAgents}
+            />
+          } />
           <Route path="/settings" element={
             <Settings 
               notificationsEnabled={notificationsEnabled} 
@@ -139,6 +215,13 @@ const App = () => {
           } />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        <CreateAgentModal 
+          isOpen={isCreateModalOpen} 
+          onClose={() => setIsCreateModalOpen(false)} 
+          onSuccess={() => {
+            fetchAgents();
+          }}
+        />
       </Layout>
     </Router>
   );

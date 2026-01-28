@@ -68,7 +68,7 @@ const Header = ({
     
     // First try to find the lead to get its post_link
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
       const res = await fetch(`${apiUrl}/leads/${notif.lead_id}`);
       if (res.ok) {
         const lead = await res.json();

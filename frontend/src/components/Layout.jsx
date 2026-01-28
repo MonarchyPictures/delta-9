@@ -31,7 +31,7 @@ const SidebarLink = ({ to, icon: Icon, label, active, onClick }) => (
   </Link>
 );
 
-const Layout = ({ children, notifications = [], markAsRead, markAllAsRead, notificationsEnabled }) => {
+const Layout = ({ children, notifications = [], markAsRead, markAllAsRead, clearNotifications, notificationsEnabled }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const location = useLocation();
@@ -159,8 +159,10 @@ const Layout = ({ children, notifications = [], markAsRead, markAllAsRead, notif
                 }`}
               >
                 <Bell size={22} />
-                {unreadCount > 0 && notificationsEnabled && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-[#0a0a0a] animate-pulse">
+                {unreadCount > 0 && (
+                  <span className={`absolute -top-1 -right-1 w-5 h-5 text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-[#0a0a0a] ${
+                    notificationsEnabled ? 'bg-red-500 animate-pulse' : 'bg-gray-500'
+                  }`}>
                     {unreadCount > 9 ? '9+' : unreadCount}
                   </span>
                 )}
@@ -172,6 +174,7 @@ const Layout = ({ children, notifications = [], markAsRead, markAllAsRead, notif
                 onClose={() => setIsNotificationsOpen(false)}
                 onMarkAsRead={markAsRead}
                 onMarkAllAsRead={markAllAsRead}
+                onClearAll={clearNotifications}
               />
             </div>
 

@@ -10,7 +10,10 @@ class BuyingIntentNLP:
         self.intent_patterns = [
             "buying", "need", "looking for", "want to purchase", 
             "urgent", "asap", "price for", "bulk order",
-            "ready to buy", "wtb", "iso", "searching for"
+            "ready to buy", "wtb", "iso", "searching for",
+            "any recommendations for", "who sells", "need urgently",
+            "where can i get", "dm me", "inbox me", "price of",
+            "how much", "budget is", "looking to buy"
         ]
 
     def extract_entities(self, text):
@@ -132,19 +135,109 @@ class BuyingIntentNLP:
             return f"Ksh {int(val):,}"
         return "Negotiable"
 
+    def classify_intent(self, text):
+        """
+        Final AI Intent Classifier (The Lock 🔒)
+        Classify this post strictly as one of the following:
+        BUYER, SELLER, or UNCLEAR.
+        
+        ENFORCEMENT RULES (MANDATORY):
+        1. IF text contains selling language AND does NOT contain buyer language -> SELLER -> EXCLUDE.
+        2. IF buyer language is missing -> intent = UNKNOWN/UNCLEAR -> EXCLUDE.
+        3. NO IMPLICIT ASSUMPTIONS (Product mention != Buyer intent).
+        """
+        text_lower = text.lower()
+        
+        # 1. HARD SELLER BLOCK LIST (ABSOLUTE)
+        seller_blacklist = [
+            "for sale", "selling", "available", "price", "discount", "offer", 
+            "promo", "delivery", "in stock", "we sell", "shop", "dealer", 
+            "supplier", "warehouse", "order now", "dm for price", 
+            "call / whatsapp", "our store", "brand new", "limited stock",
+            "flash sale", "retail price", "wholesale", "best price",
+            "check out", "visit us", "located at", "we deliver", "buy from us",
+            "contact for price", "special offer", "new arrival", "stockist",
+            "dm to order", "shipping available", "price is", "kwa bei ya",
+            "tunauza", "mzigo mpya", "punguzo", "call me for", "contact me for",
+            "we are selling", "buy now", "click here", "follow us", "best deals",
+            "order today", "price:", "contact:", "dm for"
+        ]
+        
+        # 2. EXPLICIT BUYER SIGNALS (ONLY THESE COUNT)
+        buyer_keywords = [
+            "looking for", "need", "need urgently", "want to buy", 
+            "where can i buy", "anyone selling", "recommend me", 
+            "who sells", "where can i get", "seeking", "iso", "wtb",
+            "can i get", "i need", "anyone with", "looking to buy",
+            "recommendation for", "best place to buy", "recommend a supplier",
+            "natafuta", "nahitaji", "nimehitaji", "nataka kununua", 
+            "ni wapi naweza pata", "mnisaidie kupata", "iko wapi",
+            "nitapata wapi", "nataka", "unauza wapi", "how much is",
+            "price for", "get one", "find one", "looking at buying",
+            "recommend", "anyone know where", "where to get",
+            "naomba", "tafadhali", "nisaidie", "mwenye anajua"
+        ]
+        
+        # 3. RULE: "who sells?" = BUYER, "selling" = SELLER
+        buyer_questions = ["who sells", "anyone selling", "who is selling", "who has", "where can i find", "where can i get", "anyone with"]
+        is_buyer_question = any(bq in text_lower for bq in buyer_questions)
+        
+        # 4. ENFORCEMENT LOGIC
+        is_seller = any(s in text_lower for s in seller_blacklist)
+        is_buyer = any(b in text_lower for b in buyer_keywords)
+        
+        # MANDATORY OVERRIDE: IF SELLING LANGUAGE IS PRESENT AND NOT A QUESTION -> SELLER
+        if is_seller and not is_buyer_question:
+            return "SELLER"
+            
+        # RULE: MUST HAVE EXPLICIT BUYER SIGNAL
+        if not is_buyer:
+            return "UNCLEAR"
+            
+        # RULE: Personal Intent Verification (Must be first-person or question)
+        personal_intent_signals = [
+            "i ", "me ", "we ", "my ", "natafuta", "nahitaji", "nataka", 
+            "i'm looking", "i am looking", "help me", "looking for",
+            "mnisaidie", "nimehitaji", "want to", "looking to"
+        ]
+        has_personal_signal = any(p in text_lower for p in personal_intent_signals)
+        
+        # Final Decision
+        if has_personal_signal or is_buyer_question:
+            # Additional check: length (too short posts are usually spam or unclear)
+            if len(text_lower) < 15 and not is_buyer_question:
+                return "UNCLEAR"
+            return "BUYER"
+            
+        return "UNCLEAR"
+
     def calculate_intent_score(self, text):
         """Calculate intent using linguistic features."""
         score = 0.0
         text_lower = text.lower()
         
         # 1. Keyword match (Strong intent signals)
-        high_intent = ["looking for", "want to buy", "buying", "need to purchase", "searching for", "where can i find", "anyone selling", "recommend", "where can i buy"]
-        medium_intent = ["price for", "how much is", "cost of", "recommendations for", "best place for", "who has", "where is"]
+        high_intent = [
+            "looking for", "want to buy", "buying", "need to purchase", 
+            "searching for", "where can i find", "anyone selling", 
+            "recommend", "where can i buy", "need urgently", "dm me", 
+            "inbox me", "wtb", "ready to buy"
+        ]
+        medium_intent = [
+            "price for", "how much is", "cost of", "recommendations for", 
+            "best place for", "who has", "where is", "anyone know where",
+            "where to get", "any leads", "budget is"
+        ]
         
-        # Social media specific intent signals
-        social_intent = ["pls assist", "help me find", "anyone know where", "kindly suggest", "where to get"]
+        # Social media specific intent signals + Emojis
+        social_intent = ["pls assist", "help me find", "anyone know where", "kindly suggest", "where to get", "💰", "🏠", "🚗", "📦", "📱"]
         if any(si in text_lower for si in social_intent):
-            score += 0.3
+            score += 0.35
+
+        # Kenya-Specific High Intent Keywords
+        kenya_intent = ["nimehitaji", "natafuta", "nahitaji", "nimehitaji", "iko wapi", "bei gani", "nitapata wapi"]
+        if any(ki in text_lower for ki in kenya_intent):
+            score += 0.4
 
         for pattern in high_intent:
             if pattern in text_lower:
