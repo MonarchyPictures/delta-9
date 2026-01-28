@@ -26,6 +26,7 @@ origins = [
     "https://delta7.onrender.com",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "*", # Allow all origins temporarily to ensure the UI can connect regardless of Render URL
 ]
 
 app.add_middleware(
