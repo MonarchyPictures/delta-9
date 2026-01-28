@@ -36,6 +36,15 @@ def verify_api_key(x_api_key: str = Header(None)):
         raise HTTPException(status_code=403, detail="Unauthorized access to market intelligence")
     return x_api_key
 
+@app.get("/")
+def read_root():
+    return {
+        "status": "online",
+        "message": "Delta9 Production API - Kenya Market Intelligence Node",
+        "version": "1.0.0",
+        "region": "Kenya"
+    }
+
 # 2. UPDATE BACKEND TO ENFORCE KENYA FILTER
 @app.get("/leads", dependencies=[Depends(verify_api_key)])
 def get_leads(
