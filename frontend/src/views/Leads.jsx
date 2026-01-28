@@ -25,11 +25,11 @@ const Leads = () => {
     }
   };
 
-  useEffect(() => {
-  fetchLeads();
-  const interval = setInterval(() => fetchLeads(true), 10000); // 4. Auto-refresh polling
-  return () => clearInterval(interval);
-  }, [location, query]);
+useEffect(() => {
+fetchLeads();
+const interval = setInterval(() => fetchLeads(true), 10000); // 4. Auto-refresh polling
+return () => clearInterval(interval);
+}, [location, query]);
 
   return (
     <div className="flex-1 bg-black p-4 md:p-8 overflow-y-auto">
