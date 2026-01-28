@@ -6,8 +6,10 @@ import {
   LayoutGrid, Volume2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 
 const Settings = ({ notificationsEnabled, setNotificationsEnabled, soundEnabled, setSoundEnabled }) => {
+  const navigate = useNavigate();
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState(null); // 'success', 'error'
   const [health, setHealth] = useState(null);
@@ -349,7 +351,7 @@ const Settings = ({ notificationsEnabled, setNotificationsEnabled, soundEnabled,
                 />
                 <StatusItem 
                   label="Task Queue" 
-                  value={health?.services?.celery?.includes('up') ? health.services.celery : 'Redis Offline'} 
+                  value={health?.services?.celery || 'Detecting...'} 
                   status={health?.services?.celery?.includes('up') ? 'success' : 'warning'} 
                 />
                 <StatusItem 
@@ -390,7 +392,10 @@ const Settings = ({ notificationsEnabled, setNotificationsEnabled, soundEnabled,
                   Enabling <span className="text-white font-black italic">Aggressive Discovery</span> bypasses standard safety cooldowns. While discovery rate increases by 300%, it elevates the risk of temporary IP isolation.
                 </p>
                 <div className="pt-2">
-                  <button className="text-brand-primary text-[10px] font-black uppercase tracking-widest flex items-center gap-1 hover:gap-2 transition-all">
+                  <button 
+                    onClick={() => navigate('/protocol')}
+                    className="text-brand-primary text-[10px] font-black uppercase tracking-widest flex items-center gap-1 hover:gap-2 transition-all"
+                  >
                     View Protocol Documentation <ChevronRight size={12} />
                   </button>
                 </div>

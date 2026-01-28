@@ -30,7 +30,7 @@ class LeadScraper:
             '"{query}" "nahitaji" {location}'
         ]
 
-    def duckduckgo_search(self, query, location="Kenya", source="DuckDuckGo", max_results=15):
+    def duckduckgo_search(self, query, location="Kenya", source="DuckDuckGo", max_results=25):
         """Search DuckDuckGo with improved query handling, retries, and intent expansion."""
         print(f"DuckDuckGo Search ({source}): {query} in {location}")
         
@@ -38,10 +38,13 @@ class LeadScraper:
         search_queries = [f"{query} {location}"]
         # Only expand if it's not already a specific site search
         if "site:" not in query:
-             # Add a few intent-heavy variations
-             templates = random.sample(self.intent_templates, 2)
+             # Add more intent-heavy variations to get more leads
+             templates = random.sample(self.intent_templates, 3)
              for t in templates:
                  search_queries.append(t.format(query=query, location=location))
+        else:
+            # If it is a site search, try to vary it slightly if it fails
+            search_queries.append(query)
 
         all_results = []
         
@@ -51,14 +54,17 @@ class LeadScraper:
                     print(f"Executing expanded query: {sq}")
                     
                     # Try multiple times for each expanded query
-                    for attempt in range(2):
+                    for attempt in range(3):
                         try:
-                            time.sleep(random.uniform(1.5, 3))
+                            # Shorter sleep for DDG if we are being careful
+                            time.sleep(random.uniform(2, 5))
                             region = 'ke-en' if 'kenya' in location.lower() else 'wt-wt'
                             
-                            # Use 'm' (month) for social sources to get fresh leads
-                            t_limit = 'm' if source in ["Facebook", "Twitter", "Reddit", "TikTok"] else None
+                            # Use 'm' (month) for general, but 'w' (week) for social to get fresh leads
+                            # 'd' (day) might be too restrictive if no posts happened today
+                            t_limit = 'w' if source in ["Facebook", "Twitter", "Reddit", "TikTok"] else 'm'
                             
+                            # Use a longer timeout for the request
                             ddg_results = list(ddgs.text(sq, region=region, max_results=max_results, timelimit=t_limit))
                             
                             if ddg_results:
@@ -66,7 +72,7 @@ class LeadScraper:
                                     href = r['href'].lower()
                                     
                                     # Filtering
-                                    blacklist = ["amazon.com", "ebay.com", "alibaba.com", "jumia.co.ke", "/login", "/signup"]
+                                    blacklist = ["amazon.com", "ebay.com", "alibaba.com", "jumia.co.ke", "/login", "/signup", "pigiame.co.ke", "jiji.co.ke"]
                                     if any(d in href for d in blacklist): continue
 
                                     # Platform filtering
@@ -85,19 +91,23 @@ class LeadScraper:
                                         "link": r['href'],
                                         "text": f"{r['title']} - {r['body']}",
                                         "category": "General",
-                                        "user": "Social Post" if source not in ["Google", "Bing"] else "Web Result",
+                                        "user": "Social Post" if source not in ["Google", "Bing", "DuckDuckGo"] else "Web Result",
                                         "location": location
                                     })
-                                break # Success for this query
+                                if len(all_results) >= max_results:
+                                    break # Got enough for this query
                         except Exception as e:
                             print(f"DDG Error on attempt {attempt+1} for {sq}: {e}")
                             time.sleep(5)
+                    
+                    if len(all_results) >= 50:
+                        break
             
             # 2. Fallback to Bing if DDG failed completely
             if not all_results and source != "Bing":
                 print(f"DDG failed for {source}. Trying Bing fallback...")
                 return self.bing_search(query, location, source=source)
-
+                
             return all_results
         except Exception as e:
             print(f"DuckDuckGo engine error: {e}")
@@ -259,119 +269,147 @@ class LeadScraper:
                     return []
 
                 # Try multiple selectors for results
-                selectors = ["li.b_algo", ".b_algo", "#b_results li", ".b_results li"]
+                selectors = [
+                    "li.b_algo", 
+                    ".b_algo", 
+                    "#b_results li", 
+                    "article",
+                    ".b_caption",
+                    "div.b_title"
+                ]
+                
+                # Wait for any of the selectors to appear
+                try:
+                    page.wait_for_selector("li.b_algo, .b_algo, #b_results, article", timeout=5000)
+                except:
+                    pass
+
                 found_selector = None
                 for selector in selectors:
                     try:
-                        if page.query_selector(selector):
+                        elements = page.query_selector_all(selector)
+                        if elements and len(elements) > 0:
                             found_selector = selector
                             break
                     except:
                         continue
                 
                 if not found_selector:
-                    print(f"No Bing results found for {source}")
-                    # Take a screenshot for debugging if needed (optional)
-                    # page.screenshot(path=f"bing_error_{source}.png")
-                    browser.close()
-                    return []
-                
-                # Extract results
-                search_results = page.query_selector_all(found_selector)
-                print(f"Bing found {len(search_results)} raw elements for {source}")
+                    print(f"No Bing results found for {source} after trying all selectors")
+                    # Fallback: Just get all links from the page
+                    search_results = page.query_selector_all("a")
+                    print(f"Fallback: Found {len(search_results)} links on Bing page")
+                else:
+                    search_results = page.query_selector_all(found_selector)
+                    print(f"Bing found {len(search_results)} raw elements for {source}")
                 
                 for res in search_results:
                     try:
-                        title_el = res.query_selector("h2 a")
-                        snippet_el = res.query_selector(".b_caption p") or res.query_selector(".snippet") or res.query_selector(".b_lineclamp2") or res.query_selector(".b_caption")
+                        # Try to find link and text within or as the element itself
+                        link = None
+                        text = ""
                         
-                        if title_el:
-                            title = title_el.inner_text()
-                            link = title_el.get_attribute("href")
-                            snippet = snippet_el.inner_text() if snippet_el else ""
+                        if found_selector == "a":
+                            link = res.get_attribute("href")
+                            title = res.inner_text()
+                            snippet = ""
+                            text = title
+                        else:
+                            title_el = res.query_selector("h2 a") or res.query_selector("a")
+                            snippet_el = res.query_selector(".b_caption p") or res.query_selector(".snippet") or res.query_selector(".b_lineclamp2") or res.query_selector(".b_caption")
                             
-                            if not link or not link.startswith("http"): continue
-                            href_lower = link.lower()
+                            if title_el:
+                                link = title_el.get_attribute("href")
+                                title = title_el.inner_text()
+                                snippet = snippet_el.inner_text() if snippet_el else ""
+                                text = f"{title} - {snippet}"
+                            else:
+                                continue
+                        
+                        if not link or not link.startswith("http"): continue
+                        if "bing.com" in link or "microsoft.com" in link: continue
+                        
+                        href_lower = link.lower()
+                        
+                        # Platform filtering logic - strictly enforce if not a general search
+                        if source not in ["Google", "DuckDuckGo", "Bing"]:
+                            platforms = {
+                                "Facebook": ["facebook.com", "fb.com", "fb.me"],
+                                "Reddit": ["reddit.com", "redd.it"],
+                                "TikTok": ["tiktok.com"],
+                                "Twitter": ["twitter.com", "x.com", "t.co"],
+                                "LinkedIn": ["linkedin.com"]
+                            }
+                            allowed_domains = platforms.get(source, [source.lower() + ".com"])
                             
-                            # Platform filtering logic - strictly enforce if not a general search
-                            if source not in ["Google", "DuckDuckGo", "Bing"]:
-                                platforms = {
-                                    "Facebook": ["facebook.com", "fb.com", "fb.me"],
-                                    "Reddit": ["reddit.com", "redd.it"],
-                                    "TikTok": ["tiktok.com"],
-                                    "Twitter": ["twitter.com", "x.com", "t.co"],
-                                    "LinkedIn": ["linkedin.com"]
-                                }
-                                allowed_domains = platforms.get(source, [source.lower() + ".com"])
+                            # Extract domain from link for better matching
+                            try:
+                                from urllib.parse import urlparse
+                                parsed_link = urlparse(link)
+                                domain = parsed_link.netloc.lower()
+                                path = parsed_link.path.lower()
                                 
-                                # Extract domain from link for better matching
-                                try:
-                                    from urllib.parse import urlparse
-                                    parsed_link = urlparse(link)
-                                    domain = parsed_link.netloc.lower()
-                                    path = parsed_link.path.lower()
+                                if not any(ad in domain for ad in allowed_domains):
+                                    continue
                                     
-                                    if not any(ad in domain for ad in allowed_domains):
-                                        continue
-                                        
-                                    # EXCLUDE common non-post pages (RELAXED)
-                                    noise = ["/login", "/signup", "robots.txt", "/terms", "/privacy", "/help/", "/support/", "index.php", "home=", "about.fb.com", "business.facebook.com", "/directory/", "/policies/"]
-                                    if any(n in path for n in noise):
-                                        continue
-                                        
-                                    # EXCLUDE top-level and utility pages
-                                    if path in ["/", "", "/home", "/explore", "/facebook/", "/twitter/", "/reddit/"]:
-                                        continue
-                                    if domain in ["l.facebook.com", "m.me"]:
-                                        continue
-                                        
-                                    # INCLUDE patterns for specific platforms - EXTREMELY RELAXED
-                                    is_valid = False
-                                    if source == "Facebook":
-                                        # Include almost any Facebook link that isn't login/signup/noise
-                                        if any(p in path for p in ["/groups/", "/posts/", "/permalink/", "/marketplace/", "/story.php", "/photo.php", "/p/", "/events/"]):
-                                            is_valid = True
-                                        elif len(path.strip('/')) > 3: # Relaxed: profiles can be short
-                                            is_valid = True
-                                    elif source == "Twitter":
-                                        if any(p in path for p in ["/status/", "/hashtag/", "/events/", "/i/"]):
-                                            is_valid = True
-                                        elif len(path.strip('/')) > 3: # Likely a profile
-                                            is_valid = True
-                                    elif source == "Reddit":
-                                        if any(p in path for p in ["/r/", "/user/", "/comments/"]):
-                                            is_valid = True
-                                        elif len(path.strip('/')) > 3:
-                                            is_valid = True
-                                    elif source == "TikTok":
-                                        if any(p in path for p in ["/video/", "/@", "/discover/"]):
-                                            is_valid = True
-                                        elif len(path.strip('/')) > 3:
-                                            is_valid = True
-                                    else:
+                                # EXCLUDE common non-post pages (RELAXED)
+                                noise = ["/login", "/signup", "robots.txt", "/terms", "/privacy", "/help/", "/support/", "index.php", "home=", "about.fb.com", "business.facebook.com", "/directory/", "/policies/"]
+                                if any(n in path for n in noise):
+                                    continue
+                                    
+                                # EXCLUDE top-level and utility pages
+                                if path in ["/", "", "/home", "/explore", "/facebook/", "/twitter/", "/reddit/"]:
+                                    continue
+                                if domain in ["l.facebook.com", "m.me"]:
+                                    continue
+                                    
+                                # INCLUDE patterns for specific platforms - EXTREMELY RELAXED
+                                is_valid = False
+                                if source == "Facebook":
+                                    # Include almost any Facebook link that isn't login/signup/noise
+                                    if any(p in path for p in ["/groups/", "/posts/", "/permalink/", "/marketplace/", "/story.php", "/photo.php", "/p/", "/events/"]):
                                         is_valid = True
-                                        
-                                    if not is_valid:
-                                        # If it's a social link but didn't match patterns, 
-                                        # we'll still keep it if it has some depth
-                                        if len(path.strip('/')) > 2:
-                                            is_valid = True
-                                        else:
-                                            print(f"Skipping {source} link due to path: {path}")
-                                            continue
-                                        
-                                except:
-                                    if not any(ad in href_lower for ad in allowed_domains):
+                                    elif len(path.strip('/')) > 3: # Relaxed: profiles can be short
+                                        is_valid = True
+                                elif source == "Twitter":
+                                    if any(p in path for p in ["/status/", "/hashtag/", "/events/", "/i/"]):
+                                        is_valid = True
+                                    elif len(path.strip('/')) > 3: # Likely a profile
+                                        is_valid = True
+                                elif source == "Reddit":
+                                    if any(p in path for p in ["/r/", "/user/", "/comments/"]):
+                                        is_valid = True
+                                    elif len(path.strip('/')) > 3:
+                                        is_valid = True
+                                elif source == "TikTok":
+                                    if any(p in path for p in ["/video/", "/@", "/discover/"]):
+                                        is_valid = True
+                                    elif len(path.strip('/')) > 3:
+                                        is_valid = True
+                                else:
+                                    is_valid = True
+                                    
+                                if not is_valid:
+                                    # If it's a social link but didn't match patterns, 
+                                    # we'll still keep it if it has some depth
+                                    if len(path.strip('/')) > 2:
+                                        is_valid = True
+                                    else:
+                                        print(f"Skipping {source} link due to path: {path}")
                                         continue
-                            
-                            results.append({
-                                "source": source,
-                                "link": link,
-                                "text": f"{title} - {snippet}",
-                                "category": "General",
-                                "user": "Social Post" if source not in ["Google", "Bing"] else "Web Result",
-                                "location": location
-                            })
+                                    
+                            except:
+                                if not any(ad in href_lower for ad in allowed_domains):
+                                    continue
+                        
+                        results.append({
+                            "source": source,
+                            "link": link,
+                            "text": f"{title} - {snippet}",
+                            "category": "General",
+                            "user": "Social Post" if source not in ["Google", "Bing"] else "Web Result",
+                            "location": location
+                        })
                     except Exception as res_err:
                         continue
                 
@@ -433,9 +471,19 @@ class LeadScraper:
                     # Use region-specific search if possible
                     region = 'ke-en' if 'kenya' in location.lower() else 'wt-wt'
                     
-                    # Use 'm' (month) for social sources to get relatively fresh leads
-                    # But if we get nothing, we'll try without time limit in later attempts
-                    t_limit = 'm' if (source in ["Facebook", "Twitter", "Reddit", "TikTok"] and attempt < 2) else None
+                    # Use 'd' (day) for social sources on first attempt for fresh leads,
+                    # then 'm' (month) for better volume, then None
+                    if source in ["Facebook", "Twitter", "Reddit", "TikTok", "LinkedIn", "Instagram"]:
+                        if attempt == 0:
+                            t_limit = 'd'
+                        elif attempt == 1:
+                            t_limit = 'w'
+                        elif attempt == 2:
+                            t_limit = 'm'
+                        else:
+                            t_limit = None
+                    else:
+                        t_limit = None
                     
                     try:
                         # Use text search

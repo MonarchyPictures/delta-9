@@ -12,9 +12,12 @@ def verify_pipeline():
     # 1. Trigger Search
     print(f"--- Step 1: Triggering Search ---")
     try:
-        res = requests.post(f"{base_url}/search?query={query}&location={location}")
+        # Increased timeout for initial heavy model load
+        res = requests.post(f"{base_url}/search?query={query}&location={location}", timeout=30)
         print(f"Search trigger status: {res.status_code}")
-        if res.status_code != 200:
+        if res.status_code == 200:
+            print(f"Response data: {res.json()}")
+        else:
             print(f"Error: {res.text}")
             return
     except Exception as e:
@@ -22,8 +25,9 @@ def verify_pipeline():
         return
 
     # 2. Wait for results (since it's background/sync fallback)
-    print(f"--- Step 2: Waiting for leads to populate ---")
-    time.sleep(20) # Increased wait
+    wait_time = 45 # Increased wait for more thorough search
+    print(f"--- Step 2: Waiting {wait_time}s for leads to populate ---")
+    time.sleep(wait_time)
 
     # 3. Check Leads
     print(f"--- Step 3: Inspecting Leads ---")

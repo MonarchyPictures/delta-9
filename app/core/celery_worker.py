@@ -84,19 +84,24 @@ def specialops_mission_task(query: str, location: str = "Kenya", agent_id: int =
         ).all()
         recent_texts = [l.buyer_request_snippet for l in recent_leads if l.buyer_request_snippet]
 
+        logger.info(f"SpecialOps Mission found {len(mission_results)} potential results")
+        
         for result in mission_results:
             try:
                 # Prepare for normalization
+                # Fix structure mismatch with specialops.py
                 raw = {
                     "source": result.get("source", "specialops"),
-                    "link": result.get("url"),
-                    "text": result.get("data", {}).get("raw_text", "") or result.get("text", ""),
-                    "title": result.get("data", {}).get("title", ""),
+                    "link": result.get("href") or result.get("url"),
+                    "text": result.get("body") or result.get("text") or result.get("data", {}).get("raw_text", ""),
+                    "title": result.get("title") or result.get("data", {}).get("title", ""),
                     "location": location
                 }
                 
+                logger.info(f"Normalizing lead from {raw['source']}: {raw['text'][:50]}...")
                 normalized = validator.normalize_lead(raw, db=db)
                 if not normalized:
+                    logger.info(f"Lead rejected by normalization")
                     continue
                 
                 # Duplicate Detection

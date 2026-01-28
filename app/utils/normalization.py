@@ -20,13 +20,15 @@ class LeadValidator:
         # 1. Classify intent strictly
         classification = self.nlp.classify_intent(text)
         
+        import logging
+        logger = logging.getLogger("radar_api")
+        
         # ABSOLUTE RULE: DISCARD IF NOT BUYER
         if classification != "BUYER":
-            import logging
-            logger = logging.getLogger("radar_api")
-            logger.info(f"Normalization discarded lead: Classification is {classification}. Text: {text[:100]}")
+            logger.info(f"❌ Normalization DISCARDED lead: Classification is {classification}. Text: {text[:150]}")
             return None # DISCARD IMMEDIATELY
             
+        logger.info(f"✅ Normalization ACCEPTED lead: Classification is {classification}. Text: {text[:150]}")
         entities = self.nlp.extract_entities(text)
         intent_score = self.nlp.calculate_intent_score(text)
         
@@ -82,7 +84,10 @@ class LeadValidator:
             
         # Social Filtering: Require some intent for social posts to avoid homepages/landing pages
         # Relaxed threshold to ensure "No Signals Detected" is minimized
-        if is_social and intent_score < 0.15: # Lowered from 0.25 to catch more leads
+        # If classification is already BUYER, we are MUCH more lenient
+        min_intent = 0.05 if classification == "BUYER" else 0.15
+        
+        if is_social and intent_score < min_intent:
             logger.info(f"Normalization dropped {platform} lead: Low intent score ({intent_score}). Link: {social_link}")
             return None
             
@@ -397,7 +402,10 @@ class LeadValidator:
         """
         score = 2.0 # Base score
         badges = []
-        is_genuine = True
+        
+        # Use the central classifier for consistency
+        classification = self.nlp.classify_intent(text)
+        is_genuine = (classification == "BUYER")
         
         # 1. Platform Credibility
         source = raw_data.get("source", "").lower()
@@ -417,37 +425,18 @@ class LeadValidator:
             score += 2
             badges.append("high_intent")
         
-        # Check for specific buying intent (e.g., "looking for", "buy", "price of")
+        # Check for specific buying intent
         buying_keywords = ["buy", "purchase", "looking for", "price of", "cost of", "where can i get"]
         if any(kw in text.lower() for kw in buying_keywords):
             score += 1
             if "high_intent" not in badges: badges.append("high_intent")
 
         # 4. Scammer/Reseller Filtering (REVERSE SIGNAL)
-        # ENFORCEMENT: If ANY seller signal is detected, it is NOT genuine.
-        seller_keywords = [
-            "for sale", "selling", "available", "price", "discount", "offer", 
-            "promo", "delivery", "in stock", "we sell", "shop", "dealer", 
-            "supplier", "warehouse", "order now", "dm for price", 
-            "call / whatsapp", "our store", "brand new", "limited stock",
-            "flash sale", "retail price", "wholesale", "best price",
-            "check out", "visit us", "located at", "we deliver", "buy from us",
-            "contact for price", "special offer", "new arrival", "stockist"
-        ]
+        if classification == "SELLER":
+            score -= 5
+            is_genuine = False
         
-        # Check if it's a buyer question first (exception)
-        buyer_questions = ["who sells", "anyone selling", "who is selling", "who has", "where can i find"]
-        is_buyer_question = any(bq in text.lower() for bq in buyer_questions)
-        
-        if any(kw in text.lower() for kw in seller_keywords) and not is_buyer_question:
-            score -= 8 # Heavy penalty
-            is_genuine = False 
-        
-        # 5. Activity/Freshness
-        # For new leads, we assume they are active
-        badges.append("active_buyer")
-        
-        return min(max(score, 1.0), 10.0), badges, is_genuine
+        return min(max(1.0, score), 10.0), badges, is_genuine
 
     def _extract_phone(self, text):
         import re

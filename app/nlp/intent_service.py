@@ -160,7 +160,15 @@ class BuyingIntentNLP:
             "dm to order", "shipping available", "price is", "kwa bei ya",
             "tunauza", "mzigo mpya", "punguzo", "call me for", "contact me for",
             "we are selling", "buy now", "click here", "follow us", "best deals",
-            "order today", "price:", "contact:", "dm for"
+            "order today", "price:", "contact:", "dm for", "sold by", "authorized dealer",
+            "warranty included", "limited time offer", "check price", "get yours",
+            "brand new", "imported", "affordable", "wholesale price", "retail",
+            "visit our shop", "we are located", "delivery available", "countrywide",
+            "pay on delivery", "lipa baada ya", "mzigo umefika", "bei nafuu",
+            "tuko na", "pata yako", "agiza sasa", "welcome to", "call us", "contact us",
+            "our shop", "our store", "check our", "see more", "click the link",
+            "available in", "brand new", "we offer", "we provide", "expert in",
+            "specializing in", "quality service", "best in kenya", "top rated"
         ]
         
         # 2. EXPLICIT BUYER SIGNALS (ONLY THESE COUNT)
@@ -175,40 +183,100 @@ class BuyingIntentNLP:
             "nitapata wapi", "nataka", "unauza wapi", "how much is",
             "price for", "get one", "find one", "looking at buying",
             "recommend", "anyone know where", "where to get",
-            "naomba", "tafadhali", "nisaidie", "mwenye anajua"
+            "naomba", "tafadhali", "nisaidie", "mwenye anajua",
+            "help me find", "assist me", "where can i find",
+            "who has", "anyone having", "where is", "buying at",
+            "budget is", "searching for", "trying to find", "trying to get",
+            "want to get", "looking to find", "in search of", "does anyone have",
+            "where can one buy", "where can one find"
         ]
         
         # 3. RULE: "who sells?" = BUYER, "selling" = SELLER
-        buyer_questions = ["who sells", "anyone selling", "who is selling", "who has", "where can i find", "where can i get", "anyone with"]
+        # Refining buyer questions: Must be specific buyer-type questions, not general marketing questions
+        buyer_questions = [
+            "who sells", "anyone selling", "who is selling", "who has", 
+            "where can i find", "where can i get", "anyone with", 
+            "anyone selling?", "does anyone have", "is anyone selling",
+            "how much is", "price of", "where is", "ni wapi naweza pata",
+            "iko wapi", "nitapata wapi"
+        ]
+        
+        # Check if it's a buyer question - avoid marking marketing questions as buyer intent
         is_buyer_question = any(bq in text_lower for bq in buyer_questions)
+        
+        # If it ends with a question mark, check if it contains a product and a buyer signal
+        if text_lower.endswith('?') and not is_buyer_question:
+            # Marketing questions often start with "looking for..." or "need..." to attract attention
+            # e.g., "Looking for tires? Welcome to X."
+            # We only count it as a buyer question if it doesn't have seller language
+            is_seller_marketing = any(s in text_lower for s in ["welcome to", "visit us", "call us", "contact us", "our shop", "we are located"])
+            if not is_seller_marketing:
+                is_buyer_question = True
         
         # 4. ENFORCEMENT LOGIC
         is_seller = any(s in text_lower for s in seller_blacklist)
         is_buyer = any(b in text_lower for b in buyer_keywords)
         
-        # MANDATORY OVERRIDE: IF SELLING LANGUAGE IS PRESENT AND NOT A QUESTION -> SELLER
-        if is_seller and not is_buyer_question:
-            return "SELLER"
+        # MANDATORY OVERRIDE: IF SELLING LANGUAGE IS PRESENT AND NOT A CLEAR BUYER QUESTION -> SELLER
+        if is_seller:
+            # Strong rejection for classic marketing language even if it contains "looking for"
+            seller_only_phrases = [
+                "dm to order", "we deliver", "shop located at", "our store", 
+                "authorized dealer for", "warranty included", "pay on delivery",
+                "welcome to", "visit us", "call us", "contact us", "our shop", 
+                "we are located", "check our", "see more", "click the link",
+                "brand new", "available in", "in stock", "our website", "follow us"
+            ]
+            if any(s in text_lower for s in seller_only_phrases):
+                return "SELLER"
+
+            # If it has seller language, it MUST have strong buyer language AND a personal signal
+            has_strong_buyer = any(b in text_lower for b in ["looking for", "need", "natafuta", "nahitaji", "want to buy", "where can i get"])
+            personal_intent_signals = [
+                "i ", "me ", "we ", "my ", "natafuta", "nahitaji", "nataka", 
+                "i'm", "im ", "i am", "help me", "looking for",
+                "mnisaidie", "nimehitaji", "want to", "looking to", "can i get",
+                "trying to", "seeking", "searching", "anyone", "who has", "where is"
+            ]
+            has_personal_signal = any(p in text_lower for p in personal_intent_signals)
             
+            if not is_buyer_question and not (has_strong_buyer and has_personal_signal):
+                return "SELLER"
+
         # RULE: MUST HAVE EXPLICIT BUYER SIGNAL
-        if not is_buyer:
-            return "UNCLEAR"
+        if not is_buyer and not is_buyer_question:
+            # Fallback for very clear questions even without keywords
+            if "?" in text_lower and any(kw in text_lower for kw in ["get", "buy", "find", "pata", "iko"]):
+                return "BUYER"
             
+            print(f"❌ Rejected: No explicit buyer signal in: {text_lower[:50]}...")
+            return "UNCLEAR"
+        
         # RULE: Personal Intent Verification (Must be first-person or question)
         personal_intent_signals = [
             "i ", "me ", "we ", "my ", "natafuta", "nahitaji", "nataka", 
-            "i'm looking", "i am looking", "help me", "looking for",
-            "mnisaidie", "nimehitaji", "want to", "looking to"
+            "i'm", "im ", "i am", "help me", "looking for",
+            "mnisaidie", "nimehitaji", "want to", "looking to", "can i get",
+            "trying to", "seeking", "searching"
         ]
         has_personal_signal = any(p in text_lower for p in personal_intent_signals)
         
         # Final Decision
         if has_personal_signal or is_buyer_question:
             # Additional check: length (too short posts are usually spam or unclear)
-            if len(text_lower) < 15 and not is_buyer_question:
+            if len(text_lower) < 10 and not is_buyer_question:
+                print(f"❌ Rejected: Too short: {text_lower[:50]}...")
                 return "UNCLEAR"
-            return "BUYER"
             
+            # Final check to avoid e-commerce noise: "price is", "buy now"
+            if any(s in text_lower for s in ["price is", "buy now", "order today"]) and not "looking for" in text_lower:
+                print(f"❌ Rejected: E-commerce noise: {text_lower[:50]}...")
+                return "SELLER"
+            
+            print(f"✅ Accepted: BUYER intent found in: {text_lower[:50]}...")
+            return "BUYER"
+        
+        print(f"❌ Rejected: No personal intent signal in: {text_lower[:50]}...")
         return "UNCLEAR"
 
     def calculate_intent_score(self, text):
@@ -221,12 +289,13 @@ class BuyingIntentNLP:
             "looking for", "want to buy", "buying", "need to purchase", 
             "searching for", "where can i find", "anyone selling", 
             "recommend", "where can i buy", "need urgently", "dm me", 
-            "inbox me", "wtb", "ready to buy"
+            "inbox me", "wtb", "ready to buy", "trying to find", "trying to get",
+            "want to get", "looking to find", "in search of", "natafuta", "nahitaji"
         ]
         medium_intent = [
             "price for", "how much is", "cost of", "recommendations for", 
             "best place for", "who has", "where is", "anyone know where",
-            "where to get", "any leads", "budget is"
+            "where to get", "any leads", "budget is", "can i get", "i need"
         ]
         
         # Social media specific intent signals + Emojis
@@ -263,18 +332,17 @@ class BuyingIntentNLP:
             score += 0.2
             
         # 5. Length penalty/bonus
-        # Very short snippets (less than 30 chars) are often noise
         if len(text_lower) < 30:
-            # If it has a high intent keyword, don't penalize as much
             if any(p in text_lower for p in high_intent):
                 score -= 0.1
             else:
                 score -= 0.3
-        # Medium length snippets are often better
         elif 50 < len(text_lower) < 300:
             score += 0.1
 
-        return max(0.0, min(score, 1.0))
+        final_score = max(0.0, min(score, 1.0))
+        # print(f"📊 Intent Score: {final_score:.2f} for text: {text_lower[:50]}...")
+        return final_score
 
     def analyze_intent_extensions(self, text):
         """Extract quantity, payment methods, etc."""

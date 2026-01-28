@@ -184,80 +184,80 @@ const Leads = () => {
         {/* Filters & Sorting */}
         <div className="flex flex-wrap items-center gap-3 mb-8 py-4 border-y border-white/5">
           {/* Radius Filter */}
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs font-bold text-white/60">
-            <MapPin size={12} className="text-blue-500" />
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-white border border-white rounded-lg text-xs font-bold text-black shadow-lg shadow-white/5">
+            <MapPin size={12} className="text-blue-600" />
             <select 
               value={radiusFilter}
               onChange={(e) => setRadiusFilter(e.target.value)}
-              className="bg-transparent outline-none border-none focus:ring-0 cursor-pointer text-white uppercase tracking-widest"
+              className="bg-transparent outline-none border-none focus:ring-0 cursor-pointer text-black font-black uppercase tracking-widest"
             >
-              <option value="anywhere" className="text-black bg-white">Anywhere</option>
-              <option value="5km" className="text-black bg-white">5km Radius</option>
-              <option value="12km" className="text-black bg-white">12km Radius</option>
-              <option value="50km" className="text-black bg-white">50km Radius</option>
-              <option value="500km" className="text-black bg-white">500km Radius</option>
+              <option value="anywhere" className="text-black">Anywhere</option>
+              <option value="5km" className="text-black">5km Radius</option>
+              <option value="12km" className="text-black">12km Radius</option>
+              <option value="50km" className="text-black">50km Radius</option>
+              <option value="500km" className="text-black">500km Radius</option>
             </select>
           </div>
 
           {/* Time Filter */}
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs font-bold text-white/60">
-            <Clock size={12} className="text-blue-500" />
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-white border border-white rounded-lg text-xs font-bold text-black shadow-lg shadow-white/5">
+            <Clock size={12} className="text-blue-600" />
             <select 
               value={timeFilter}
               onChange={(e) => setTimeFilter(e.target.value)}
-              className="bg-transparent outline-none border-none focus:ring-0 cursor-pointer text-white uppercase tracking-widest"
+              className="bg-transparent outline-none border-none focus:ring-0 cursor-pointer text-black font-black uppercase tracking-widest"
             >
-              <option value="1" className="text-black bg-white">Last 1h</option>
-              <option value="24" className="text-black bg-white">Last 24h</option>
-              <option value="72" className="text-black bg-white">Last 72h</option>
-              <option value="168" className="text-black bg-white">Last 7 Days</option>
-              <option value="720" className="text-black bg-white">Last 30 Days</option>
+              <option value="1" className="text-black">Last 1h</option>
+              <option value="24" className="text-black">Last 24h</option>
+              <option value="72" className="text-black">Last 72h</option>
+              <option value="168" className="text-black">Last 7 Days</option>
+              <option value="720" className="text-black">Last 30 Days</option>
             </select>
           </div>
 
           {/* WhatsApp Filter */}
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs font-bold text-white/60">
-            <MessageCircle size={12} className="text-green-500" />
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-white border border-white rounded-lg text-xs font-bold text-black shadow-lg shadow-white/5">
+            <MessageCircle size={12} className="text-green-600" />
             <select 
               value={whatsappFilter}
               onChange={(e) => setWhatsappFilter(e.target.value)}
-              className="bg-transparent outline-none border-none focus:ring-0 cursor-pointer text-white uppercase tracking-widest"
+              className="bg-transparent outline-none border-none focus:ring-0 cursor-pointer text-black font-black uppercase tracking-widest"
             >
-              <option value="any" className="text-black bg-white">Any Contact</option>
-              <option value="yes" className="text-black bg-white">WhatsApp Only</option>
+              <option value="any" className="text-black">Any Contact</option>
+              <option value="yes" className="text-black">WhatsApp Only</option>
             </select>
           </div>
 
           {/* Status Filter */}
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs font-bold text-white/60">
-            <ShieldCheck size={12} className="text-purple-500" />
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-white border border-white rounded-lg text-xs font-bold text-black shadow-lg shadow-white/5">
+            <ShieldCheck size={12} className="text-purple-600" />
             <select 
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="bg-transparent outline-none border-none focus:ring-0 cursor-pointer text-white uppercase tracking-widest"
+              className="bg-transparent outline-none border-none focus:ring-0 cursor-pointer text-black font-black uppercase tracking-widest"
             >
-              <option value="all" className="text-black bg-white">All Status</option>
-              <option value="new" className="text-black bg-white">🟢 New</option>
-              <option value="contacted" className="text-black bg-white">🟡 Contacted</option>
-              <option value="replied" className="text-black bg-white">🔵 Replied</option>
-              <option value="negotiating" className="text-black bg-white">🟣 Negotiating</option>
-              <option value="converted" className="text-black bg-white">✅ Converted</option>
-              <option value="dead" className="text-black bg-white">🔴 Dead</option>
+              <option value="all" className="text-black">All Status</option>
+              <option value="new" className="text-black">🟢 New</option>
+              <option value="contacted" className="text-black">🟡 Contacted</option>
+              <option value="replied" className="text-black">🔵 Replied</option>
+              <option value="negotiating" className="text-black">🟣 Negotiating</option>
+              <option value="converted" className="text-black">✅ Converted</option>
+              <option value="dead" className="text-black">🔴 Dead</option>
             </select>
           </div>
 
           <div className="flex-1" />
 
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-xs font-bold text-white/60">
-            <SortAsc size={14} />
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-white border border-white rounded-lg text-xs font-bold text-black shadow-lg shadow-white/5">
+            <SortAsc size={14} className="text-slate-600" />
             <select 
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
-              className="bg-transparent outline-none border-none focus:ring-0 cursor-pointer text-white uppercase tracking-widest"
+              className="bg-transparent outline-none border-none focus:ring-0 cursor-pointer text-black font-black uppercase tracking-widest"
             >
-              <option value="newest" className="text-black bg-white">Newest</option>
-              <option value="distance" className="text-black bg-white">Nearest</option>
-              <option value="intent" className="text-black bg-white">Highest Intent</option>
+              <option value="newest" className="text-black">Newest</option>
+              <option value="distance" className="text-black">Nearest</option>
+              <option value="intent" className="text-black">Highest Intent</option>
             </select>
           </div>
         </div>

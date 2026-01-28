@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 from ddgs import DDGS
 from googlesearch import search as google_search
+from scraper import LeadScraper
 
 from app.utils.normalization import LeadValidator
 from app.nlp.intent_service import BuyingIntentNLP
@@ -23,6 +24,7 @@ class SpecialOpsAgent:
     
     def __init__(self):
         self.ddgs = DDGS()
+        self.scraper = LeadScraper()
         self.compliance = ComplianceManager()
         self.intent_service = BuyingIntentNLP()
         self.validator = LeadValidator()
@@ -90,6 +92,7 @@ class SpecialOpsAgent:
                 # ONLY ALLOW BUYER
                 if classification != "BUYER":
                     print(f"⏩ Discarding non-buyer lead (Classification: {classification}): {url}")
+                    print(f"   Content preview: {content_text[:150]}...")
                     continue
 
                 extracted_data = self._extract_intelligence(crawl_data, url, query)
@@ -126,20 +129,20 @@ class SpecialOpsAgent:
         
         # Construct expanded queries using Kenyan language patterns
         # REWRITTEN: Stricter buyer-only intent queries with broader platform coverage
+        # REDUCED count to avoid 429s and excessive resource usage
         expanded_queries = [
-            f'site:reddit.com ("looking for" OR "where can I buy" OR "anyone selling" OR "recommend" OR "need") "{query}" ("Kenya" OR "Nairobi")',
-            f'site:facebook.com ("looking for" OR "where can I buy" OR "anyone selling" OR "recommend" OR "need") "{query}" ("Kenya" OR "Nairobi")',
-            f'site:twitter.com ("looking for" OR "where can I buy" OR "anyone selling" OR "need") "{query}" ("Kenya" OR "Nairobi")',
-            f'site:x.com ("looking for" OR "need" OR "want to buy") "{query}" ("Kenya" OR "Nairobi")',
-            f'site:instagram.com ("looking for" OR "where can I buy") "{query}" ("Kenya" OR "Nairobi")',
+            f'"{query}" Kenya "looking for"',
             f'"{query}" Kenya "natafuta"',
-            f'"{query}" Kenya "nahitaji"',
-            f'"{query}" Kenya "nataka kununua"',
-            f'"{query}" Kenya "mnisaidie kupata"',
             f'"{query}" Kenya "where to buy"',
-            f'"{query}" Kenya "who sells"',
-            f'"{query}" Kenya "any leads for"',
-            f'"{query}" Kenya "urgent requirement"'
+            f'"{query}" Kenya "anyone selling"',
+            f'"{query}" Kenya "need"'
+        ]
+        
+        # Add social specific queries
+        social_queries = [
+            f'site:reddit.com "{query}" Kenya "looking for"',
+            f'site:facebook.com "{query}" Kenya "looking for"',
+            f'site:twitter.com "{query}" Kenya "looking for"'
         ]
         
         # ABSOLUTE SELLER BLOCKLIST (Internal) - Expanded
@@ -152,132 +155,114 @@ class SpecialOpsAgent:
             "check out", "visit us", "located at", "we deliver", "buy from us",
             "contact for price", "special offer", "new arrival", "stockist",
             "dm to order", "shipping available", "price is", "kwa bei ya",
-            "tunauza", "mzigo mpya", "punguzo", "call me for", "contact me for"
+            "tunauza", "mzigo mpya", "punguzo", "call me for", "contact me for",
+            "brand new", "imported", "affordable", "wholesale price", "retail",
+            "visit our shop", "we are located", "delivery available", "countrywide",
+            "pay on delivery", "lipa baada ya", "mzigo umefika", "bei nafuu",
+            "tuko na", "pata yako", "agiza sasa"
         ]
         
         # Exclude common irrelevant domains
         excluded_sites = [
-            "zhihu.com", "wikipedia.org", "amazon.com", "alibaba.com", 
-            "ebay.com", "aliexpress.com", "youtube.com", "pinterest.com",
-            "quora.com", "tripadvisor.com", "booking.com", "support.google.com",
+            "amazon.com", "alibaba.com", "ebay.com", "aliexpress.com", 
             "jumia.co.ke", "jiji.co.ke", "pigiame.co.ke", "kilimall.co.ke",
             "jumia.com", "jiji.com", "pigiame.com", "kilimall.com"
         ]
         site_filter = " " + " ".join([f"-site:{site}" for site in excluded_sites])
-        # Add negative keywords to query to push down sellers - REDUCED to avoid breaking search
-        essential_negatives = ["selling", "available", "price", "discount", "offer", "promo", "delivery", "shop", "dealer", "supplier", "warehouse", "wholesale", "stockist", "tunauza", "punguzo"]
-        negative_keywords = " " + " ".join([f'-"{kw}"' for kw in essential_negatives])
         
         print(f"🔍 Starting Kenyan Intent Search for: {query}")
         
         all_results = []
-        for q in expanded_queries:
+        
+        # Combine and shuffle to vary search patterns
+        target_queries = expanded_queries + social_queries
+        random.shuffle(target_queries)
+        
+        # Limit to 5 queries for better coverage
+        for q in target_queries[:5]:
             try:
+                # Determine source based on query
+                source = "DuckDuckGo"
+                if "site:facebook.com" in q: source = "Facebook"
+                elif "site:reddit.com" in q: source = "Reddit"
+                elif "site:twitter.com" in q: source = "Twitter"
+                
+                # Keep query short and sweet
                 search_q = q
-                if "site:" not in q:
-                    search_q += site_filter + negative_keywords
                 
-                print(f"🔎 Query: {search_q}")
-                results = []
+                print(f"🔎 Query: {search_q} (Source: {source})")
                 
-                # Try DuckDuckGo first
-                try:
-                    with DDGS() as ddgs:
-                        ddgs_results = list(ddgs.text(search_q, region='ke-en', max_results=20))
-                        if ddgs_results:
-                            for r in ddgs_results:
-                                results.append({
-                                    "title": r.get("title", ""),
-                                    "body": r.get("body", "") or r.get("snippet", ""),
-                                    "href": r.get("href") or r.get("url")
-                                })
-                except Exception as e:
-                    print(f"⚠️ DDGS Error: {e}")
-                    # Fallback to direct Google search
-                    print(f"🔄 Falling back to Direct Google for: {search_q}")
+                # DuckDuckGo is the primary driver in scraper.py
+                # Add retry logic and error handling
+                scraper_results = []
+                for attempt in range(2):
                     try:
-                        from googlesearch import search as gsearch
-                        # Use a simpler query for Google fallback
-                        g_query = f"{query} {location} \"looking for\""
-                        for url in gsearch(g_query, num_results=10, lang="en"):
-                            results.append({
-                                "title": f"Google Result: {query}",
-                                "body": f"Potential lead for {query} found via Google search.",
-                                "href": url
-                            })
-                    except Exception as ge:
-                        print(f"⚠️ Google Search Fallback Error: {ge}")
-
-                if results:
-                    # RELEVANCE FILTERING (ENFORCEMENT)
-                    filtered = []
-                    for r in results:
-                        title = r.get("title", "").lower()
-                        snippet = r.get("body", "").lower()
-                        url = (r.get("href") or "").lower()
-                        combined_text = f"{title} {snippet}"
-                        
-                        # Use the central classifier for consistency
-                        classification = self.intent_service.classify_intent(combined_text)
-                        
-                        # ABSOLUTE DISCARD: If intent is not clearly BUYER -> DISCARD IMMEDIATELY.
-                        if classification != "BUYER":
-                            # print(f"⏩ Search-level discard (Classification: {classification}): {url}")
-                            continue
-                        
-                        # Check if query keywords are in title or snippet
-                        query_keywords = query.lower().split()
-                        important_keywords = [kw for kw in query_keywords if len(kw) > 2]
-                        
-                        # BROADENED RELEVANCE: Check for ANY important keyword
-                        has_query = any(kw in combined_text for kw in important_keywords)
-                        if not has_query:
-                            continue
-                        
-                        # Kenya signal check
-                        kenyan_cities = ["nairobi", "mombasa", "kisumu", "nakuru", "eldoret", "thika", "machakos", "kiambu", "kenya", "naivasha", "kitui", "embu", "meru"]
-                        has_kenya_signal = any(sig in combined_text or sig in url for sig in kenyan_cities + [".ke", "/ke/"])
-                        
-                        # If it's a social site, we are more lenient with the geo signal but NOT the intent
-                        is_social_url = any(s in url for s in ["reddit.com", "facebook.com", "x.com", "twitter.com"])
-                        if is_social_url:
-                            has_kenya_signal = True 
-                        
-                        if has_kenya_signal:
-                            filtered.append(r)
-                    
-                    all_results.extend(filtered)
-            
-                time.sleep(random.uniform(0.5, 1.5))
-            except Exception as e:
-                print(f"❌ Search Loop Error for '{q}': {e}")
-                continue
+                        scraper_results = self.scraper.duckduckgo_search(search_q, location=location, source=source)
+                        if scraper_results: break
+                        time.sleep(random.uniform(3, 6))
+                    except Exception as e:
+                        print(f"⚠️ Attempt {attempt+1} failed for {source}: {e}")
+                        time.sleep(5)
                 
-        # SAFETY NET (Auto-Recovery)
-        # If results are low, expand search but NEVER relax seller filters
-        if len(all_results) < 5:
-            print("⚠️ Low results. Expanding search window and synonyms...")
-            # Example expansion: broader location and synonyms
-            synonym_queries = [
-                f'"{query}" Kenya "recommendation"',
-                f'"{query}" Nairobi "where can I get"',
-                f'"{query}" Kenya "who sells"'
-            ]
-            for sq in synonym_queries:
-                # (Logic to perform additional searches would go here, 
-                # but for now we've already included many variations)
-                pass
+                if scraper_results:
+                    for r in scraper_results:
+                        all_results.append({
+                            "title": r.get("text", "")[:100],
+                            "body": r.get("text", ""),
+                            "href": r.get("link")
+                        })
+                
+                # SIGNIFICANT delay to avoid 429
+                time.sleep(random.uniform(5, 12))
+                
+                if len(all_results) >= 40: # Increased to get more candidates
+                    break
+                            
+            except Exception as e:
+                print(f"⚠️ Search Error for query {q}: {e}")
 
-        # Deduplicate results by URL
-        unique_results = []
+        # RELEVANCE FILTERING (ENFORCEMENT)
+        filtered = []
         seen_urls = set()
         for r in all_results:
             url = r.get("href")
-            if url and url not in seen_urls:
-                unique_results.append(r)
-                seen_urls.add(url)
+            if not url or url in seen_urls:
+                continue
                 
-        return unique_results
+            title = r.get("title", "").lower()
+            snippet = r.get("body", "").lower()
+            combined_text = f"{title} {snippet}"
+            
+            # Use the central classifier for consistency
+            classification = self.intent_service.classify_intent(combined_text)
+            
+            # ABSOLUTE DISCARD: If intent is not clearly BUYER or UNCLEAR (with query match) -> DISCARD.
+            if classification not in ["BUYER", "UNCLEAR"]:
+                continue
+            
+            # Check if query keywords are in title or snippet
+            query_keywords = query.lower().split()
+            important_keywords = [kw for kw in query_keywords if len(kw) > 2]
+            
+            # BROADENED RELEVANCE: Check for ANY important keyword
+            has_query = any(kw in combined_text for kw in important_keywords)
+            if not has_query:
+                continue
+            
+            # Kenya signal check
+            kenyan_cities = ["nairobi", "mombasa", "kisumu", "nakuru", "eldoret", "thika", "machakos", "kiambu", "kenya", "naivasha", "kitui", "embu", "meru"]
+            has_kenya_signal = any(sig in combined_text or sig in url.lower() for sig in kenyan_cities + [".ke", "/ke/"])
+            
+            # If it's a social site or it's clearly a BUYER, we are more lenient with the geo signal
+            is_social_url = any(s in url.lower() for s in ["reddit.com", "facebook.com", "x.com", "twitter.com"])
+            if is_social_url or classification == "BUYER":
+                has_kenya_signal = True 
+            
+            if has_kenya_signal:
+                filtered.append(r)
+                seen_urls.add(url)
+        
+        return filtered
 
     def _searxng_search(self, query: str, location: str) -> List[Dict]:
         """Deprecated: Use _perform_search instead"""

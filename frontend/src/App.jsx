@@ -6,6 +6,7 @@ import Leads from './views/Leads';
 import Agents from './views/Agents';
 import Settings from './views/Settings';
 import Radar from './views/Radar';
+import Protocol from './views/Protocol';
 import CreateAgentModal from './components/CreateAgentModal';
 
 const App = () => {
@@ -213,6 +214,7 @@ const App = () => {
               setSoundEnabled={setSoundEnabled}
             />
           } />
+          <Route path="/protocol" element={<Protocol />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <CreateAgentModal 
