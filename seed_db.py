@@ -6,49 +6,88 @@ import uuid
 
 def seed_data():
     # Create tables
+    models.Base.metadata.drop_all(bind=database.engine)
     models.Base.metadata.create_all(bind=database.engine)
     db = SessionLocal()
     
-    # Sample leads
+    now = datetime.utcnow()
+    
+    # Sample leads with Kenya context and varied filter attributes
     sample_leads = [
         {
             "id": str(uuid.uuid4()),
-            "source_platform": "Reddit",
-            "post_link": "https://reddit.com/r/tires/1",
-            "location_raw": "New York, NY",
-            "latitude": 40.7128,
-            "longitude": -74.0060,
-            "buyer_request_snippet": "Looking for winter tires for my SUV, need them ASAP!",
+            "source_platform": "Twitter",
+            "post_link": "https://twitter.com/user/tires_1",
+            "location_raw": "Westlands, Nairobi",
+            "property_country": "Kenya",
+            "buyer_request_snippet": "I need new tires for my Prado ASAP. Westlands area.",
             "product_category": "Tires",
-            "intent_score": 0.9,
+            "intent_score": 0.95,
+            "radius_km": 2.5,
+            "contact_phone": "+254712345678",
+            "buyer_name": "John Kamau",
             "status": models.CRMStatus.NEW,
-            "created_at": datetime.utcnow() - timedelta(hours=2)
+            "created_at": now - timedelta(minutes=15)
         },
         {
             "id": str(uuid.uuid4()),
             "source_platform": "Facebook",
-            "post_link": "https://facebook.com/groups/2",
-            "location_raw": "Brooklyn, NY",
-            "latitude": 40.6782,
-            "longitude": -73.9442,
-            "buyer_request_snippet": "Anyone selling bulk sugar? Need 500kg for my bakery.",
-            "product_category": "Sugar",
-            "intent_score": 0.85,
-status=models.CRMStatus.NEW,
-            "created_at": datetime.utcnow() - timedelta(hours=24)
+            "post_link": "https://facebook.com/groups/tanks_1",
+            "location_raw": "Kitengela, Kajiado",
+            "property_country": "Kenya",
+            "buyer_request_snippet": "Looking for 10,000L water tanks for my farm in Kitengela.",
+            "product_category": "Water Tanks",
+            "intent_score": 0.88,
+            "radius_km": 45.0,
+            "contact_phone": "+254722998877",
+            "buyer_name": "Mary Wambui",
+            "status": models.CRMStatus.NEW,
+            "created_at": now - timedelta(hours=5)
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "source_platform": "Reddit",
+            "post_link": "https://reddit.com/r/kenya/solar",
+            "location_raw": "Nakuru",
+            "property_country": "Kenya",
+            "buyer_request_snippet": "Anyone selling solar panels in Nakuru? Planning to install next month.",
+            "product_category": "Solar Panels",
+            "intent_score": 0.65,
+            "radius_km": 150.0,
+            "contact_phone": None, # No WhatsApp
+            "buyer_name": "David Otieno",
+            "status": models.CRMStatus.NEW,
+            "created_at": now - timedelta(hours=30)
         },
         {
             "id": str(uuid.uuid4()),
             "source_platform": "Twitter",
-            "post_link": "https://twitter.com/user/3",
-            "location_raw": "Los Angeles, CA",
-            "latitude": 34.0522,
-            "longitude": -118.2437,
-            "buyer_request_snippet": "ISO furniture for my new apartment. Buying today!",
-            "product_category": "Furniture",
-            "intent_score": 0.95,
-            "status": models.ContactStatus.NOT_CONTACTED,
-            "created_at": datetime.utcnow() - timedelta(hours=48)
+            "post_link": "https://twitter.com/user/tires_2",
+            "location_raw": "Eldoret",
+            "property_country": "Kenya",
+            "buyer_request_snippet": "Where can I get truck tires in Eldoret? Bulk order.",
+            "product_category": "Tires",
+            "intent_score": 0.92,
+            "radius_km": 300.0,
+            "contact_phone": "+254733112233",
+            "buyer_name": "Sarah Juma",
+            "status": models.CRMStatus.NEW,
+            "created_at": now - timedelta(days=2)
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "source_platform": "Instagram",
+            "post_link": "https://instagram.com/p/cement_1",
+            "location_raw": "Mombasa Road, Nairobi",
+            "property_country": "Kenya",
+            "buyer_request_snippet": "I need 100 bags of cement delivered to my site on Mombasa Road.",
+            "product_category": "Cement",
+            "intent_score": 0.98,
+            "radius_km": 12.0,
+            "contact_phone": "+254700554433",
+            "buyer_name": "Peter Njoroge",
+            "status": models.CRMStatus.NEW,
+            "created_at": now - timedelta(minutes=45)
         }
     ]
     
@@ -56,9 +95,60 @@ status=models.CRMStatus.NEW,
         lead = models.Lead(**lead_data)
         db.add(lead)
     
+    # Sample Agents
+    sample_agents = [
+        {
+            "name": "Nairobi Tire Hunter",
+            "query": "Tires",
+            "location": "Nairobi",
+            "radius": 50,
+            "min_intent_score": 0.85,
+            "is_active": 1,
+            "enable_alerts": 1
+        },
+        {
+            "name": "National Tank Scout",
+            "query": "Tanks",
+            "location": "Kenya",
+            "radius": 500,
+            "min_intent_score": 0.7,
+            "is_active": 1,
+            "enable_alerts": 1
+        }
+    ]
+
+    for agent_data in sample_agents:
+        agent = models.Agent(**agent_data)
+        db.add(agent)
+    
+    db.commit()
+
+    # Sample Notifications
+    leads = db.query(models.Lead).all()
+    agents = db.query(models.Agent).all()
+    
+    if leads and agents:
+        sample_notifications = [
+            {
+                "lead_id": leads[0].id,
+                "agent_id": agents[0].id,
+                "message": f"🚨 REAL-TIME ALERT: High intent signal for {leads[0].product_category} detected in {leads[0].location_raw}",
+                "is_read": 0
+            },
+            {
+                "lead_id": leads[1].id,
+                "agent_id": agents[1].id,
+                "message": f"URGENT: New market opportunity: {leads[1].buyer_request_snippet}",
+                "is_read": 0
+            }
+        ]
+        for notif_data in sample_notifications:
+            notif = models.Notification(**notif_data)
+            db.add(notif)
+
     try:
         db.commit()
-        print("Database seeded successfully!")
+        print("Database seeded successfully with Kenya Market Intel!")
     except Exception as e:
         print(f"Error seeding database: {e}")
         db.rollback()

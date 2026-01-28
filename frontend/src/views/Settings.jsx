@@ -1,6 +1,36 @@
 import React from 'react';
+import getApiUrl, { getApiKey } from '../config';
 
 const Settings = ({ notificationsEnabled, setNotificationsEnabled, soundEnabled, setSoundEnabled }) => {
+  const updateSettings = async (newSettings) => {
+    try {
+      const apiUrl = getApiUrl();
+      const apiKey = getApiKey();
+      await fetch(`${apiUrl}/settings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': apiKey
+        },
+        body: JSON.stringify(newSettings)
+      });
+    } catch (err) {
+      console.error("Failed to update settings:", err);
+    }
+  };
+
+  const toggleNotifications = () => {
+    const newValue = !notificationsEnabled;
+    setNotificationsEnabled(newValue);
+    updateSettings({ notifications_enabled: newValue });
+  };
+
+  const toggleSound = () => {
+    const newValue = !soundEnabled;
+    setSoundEnabled(newValue);
+    updateSettings({ sound_enabled: newValue });
+  };
+
   return (
     <div className="flex-1 bg-black p-8 text-white overflow-y-auto">
       <div className="max-w-2xl mx-auto space-y-12">
@@ -13,7 +43,7 @@ const Settings = ({ notificationsEnabled, setNotificationsEnabled, soundEnabled,
               <p className="text-white/40 text-sm italic">Alert me when new leads appear in Nairobi</p>
             </div>
             <button 
-              onClick={() => setNotificationsEnabled(!notificationsEnabled)}
+              onClick={toggleNotifications}
               className={`w-14 h-8 rounded-full transition-all ${notificationsEnabled ? 'bg-blue-600' : 'bg-white/10'}`}
             >
               <div className={`w-6 h-6 bg-white rounded-full transition-all transform ${notificationsEnabled ? 'translate-x-7' : 'translate-x-1'}`} />
@@ -26,7 +56,7 @@ const Settings = ({ notificationsEnabled, setNotificationsEnabled, soundEnabled,
               <p className="text-white/40 text-sm italic">Play a sound for high-confidence intents</p>
             </div>
             <button 
-              onClick={() => setSoundEnabled(!soundEnabled)}
+              onClick={toggleSound}
               className={`w-14 h-8 rounded-full transition-all ${soundEnabled ? 'bg-blue-600' : 'bg-white/10'}`}
             >
               <div className={`w-6 h-6 bg-white rounded-full transition-all transform ${soundEnabled ? 'translate-x-7' : 'translate-x-1'}`} />

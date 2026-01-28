@@ -1,6 +1,8 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { MapPin, ArrowRight, Zap, Search } from 'lucide-react';
+import getApiUrl, { getApiKey } from '../config';
+
 /**
  * @typedef {import('./LeadCard').Lead} Lead
  */
@@ -12,8 +14,13 @@ const LiveFeedItem = ({ lead, isNew }) => {
   const handleEngage = async (e) => {
     e.stopPropagation();
     try {
-      await fetch(`${import.meta.env.VITE_API_URL}/outreach/contact/${lead.id}`, {
+      const apiUrl = getApiUrl();
+      const apiKey = getApiKey();
+      await fetch(`${apiUrl}/outreach/contact/${lead.id}`, {
         method: 'POST',
+        headers: {
+          'X-API-Key': apiKey
+        }
       });
     } catch (err) {
       console.error("Failed to track engagement", err);

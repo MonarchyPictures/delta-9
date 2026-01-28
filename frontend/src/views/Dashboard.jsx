@@ -3,7 +3,7 @@ import { Search, Activity, Target } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import LeadCard from '../components/LeadCard';
-import getApiUrl from '../config';
+import getApiUrl, { getApiKey } from '../config';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -16,19 +16,27 @@ const Dashboard = () => {
     if (!isPolling) setLoading(true);
     try {
       const apiUrl = getApiUrl();
+      const apiKey = getApiKey();
       if (!isPolling) {
         setLeads([]);
         setHasSearched(true);
         // Direct DB Ingestion Trigger
         await fetch(`${apiUrl}/search`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          headers: { 
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-API-Key': apiKey
+          },
           body: new URLSearchParams({ query: searchQuery, location: 'Nairobi' })
         });
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
 
-      const res = await fetch(`${apiUrl}/leads?query=${encodeURIComponent(searchQuery)}&limit=10`);
+      const res = await fetch(`${apiUrl}/leads?query=${encodeURIComponent(searchQuery)}&limit=10`, {
+        headers: {
+          'X-API-Key': apiKey
+        }
+      });
       if (res.ok) {
         const data = await res.json();
         setLeads(data);

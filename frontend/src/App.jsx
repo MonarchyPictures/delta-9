@@ -1,4 +1,4 @@
-import getApiUrl from './config';
+import getApiUrl, { getApiKey } from './config';
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
@@ -24,8 +24,12 @@ const App = () => {
     
     try {
       const apiUrl = getApiUrl();
+      const apiKey = getApiKey();
       const res = await fetch(`${apiUrl}/agents`, {
-        signal: requestController.signal
+        signal: requestController.signal,
+        headers: {
+          'X-API-Key': apiKey
+        }
       });
       clearTimeout(timeoutId);
       if (res.ok) {
@@ -51,6 +55,7 @@ const App = () => {
   useEffect(() => {
     let isMounted = true;
     const apiUrl = getApiUrl();
+    const apiKey = getApiKey();
 
     const fetchInitialSettings = async () => {
       const requestController = new AbortController();
@@ -58,7 +63,10 @@ const App = () => {
       
       try {
         const res = await fetch(`${apiUrl}/settings`, {
-          signal: requestController.signal
+          signal: requestController.signal,
+          headers: {
+            'X-API-Key': apiKey
+          }
         });
         clearTimeout(timeoutId);
         if (res.ok && isMounted) {
@@ -116,8 +124,12 @@ const App = () => {
       const timeoutId = setTimeout(() => requestController.abort(), 10000);
 
       try {
+        const apiKey = getApiKey();
         const res = await fetch(`${apiUrl}/notifications`, {
-          signal: requestController.signal
+          signal: requestController.signal,
+          headers: {
+            'X-API-Key': apiKey
+          }
         });
         clearTimeout(timeoutId);
         if (res.ok && isMounted) {
@@ -150,8 +162,14 @@ const App = () => {
 
   const markAsRead = async (id) => {
     const apiUrl = getApiUrl();
+    const apiKey = getApiKey();
     try {
-      await fetch(`${apiUrl}/notifications/${id}/read`, { method: 'POST' });
+      await fetch(`${apiUrl}/notifications/${id}/read`, { 
+        method: 'POST',
+        headers: {
+          'X-API-Key': apiKey
+        }
+      });
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: 1 } : n));
     } catch (err) {
       console.error("Failed to mark as read:", err);
@@ -167,8 +185,14 @@ const App = () => {
 
   const clearNotifications = async () => {
     const apiUrl = getApiUrl();
+    const apiKey = getApiKey();
     try {
-      const res = await fetch(`${apiUrl}/notifications/clear`, { method: 'DELETE' });
+      const res = await fetch(`${apiUrl}/notifications/clear`, { 
+        method: 'DELETE',
+        headers: {
+          'X-API-Key': apiKey
+        }
+      });
       if (res.ok) {
         setNotifications([]);
       }
@@ -189,20 +213,16 @@ const App = () => {
         markAllAsRead={markAllAsRead}
         clearNotifications={clearNotifications}
         notificationsEnabled={notificationsEnabled}
+        setNotificationsEnabled={setNotificationsEnabled}
       >
         <Routes>
           <Route path="/" element={<Dashboard />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-<Route path="/" element={<Dashboard />} />
+          <Route path="/leads" element={<Leads />} />
           <Route path="/agents" element={
             <Agents 
               onCreateAgent={handleCreateAgent} 
-              notificationsEnabled={notificationsEnabled}
-              setNotificationsEnabled={setNotificationsEnabled}
               agents={agents}
-              setAgents={setAgents}
               loading={loadingAgents}
-              fetchAgents={fetchAgents}
             />
           } />
           <Route path="/settings" element={

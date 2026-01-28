@@ -1,29 +1,22 @@
-import getApiUrl from '../config';
+import getApiUrl, { getApiKey } from '../config';
 import React, { useState, useRef, useEffect } from 'react';
-import { Dashboard, Plus, User, Bell, Menu, X, Clock, Trash2, Settings } from 'lucide-react';
+import { LayoutDashboard, Plus, User, Bell, Menu, X, Clock, Trash2, Settings, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 
 const Header = ({ 
-  onCreateAgent, 
-  activeTab, 
-  onTabChange, 
   notifications = [], 
-  setNotifications,
+  markAsRead,
+  markAllAsRead,
+  clearNotifications,
   notificationsEnabled,
-  setNotificationsEnabled,
-  onNotificationClick
+  setNotificationsEnabled
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
   const dropdownRef = useRef(null);
+  const navigate = useNavigate();
   
-  const navItems = [
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'leads', label: 'Leads' },
-    { id: 'agents', label: 'Agents' },
-    { id: 'settings', label: 'Settings' },
-  ];
-
-  const unreadCount = notifications.filter(n => n.unread).length;
+  const unreadCount = notifications.filter(n => n.is_read === 0).length;
 
   const formatTime = (dateStr) => {
     if (!dateStr) return 'Just now';
@@ -54,23 +47,26 @@ const Header = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleMarkAsRead = (id) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, unread: false } : n));
-  };
-
   const handleClearAll = () => {
-    setNotifications([]);
+    clearNotifications();
     setShowNotifications(false);
   };
 
   const handleItemClick = async (notif) => {
-    handleMarkAsRead(notif.id);
+    if (notif.is_read === 0) {
+      markAsRead(notif.id);
+    }
     setShowNotifications(false);
     
     // First try to find the lead to get its post_link
     try {
       const apiUrl = getApiUrl();
-      const res = await fetch(`${apiUrl}/leads/${notif.lead_id}`);
+      const apiKey = getApiKey();
+      const res = await fetch(`${apiUrl}/leads/${notif.lead_id}`, {
+        headers: {
+          'X-API-Key': apiKey
+        }
+      });
       if (res.ok) {
         const lead = await res.json();
         if (lead && lead.post_link) {
@@ -80,49 +76,11 @@ const Header = ({
     } catch (err) {
       console.error("Failed to fetch lead link from notification:", err);
     }
-    
-    // Also trigger the dashboard view to focus on this lead if needed
-    onNotificationClick(notif.lead_id);
   };
 
   return (
-    <header className="h-16 fixed top-0 left-0 right-0 bg-white/80 backdrop-blur-md border-b border-gray-100 z-[100] px-4 md:px-8">
-      <div className="max-w-7xl mx-auto h-full flex items-center justify-between relative">
-        {/* Logo Left */}
-        <div 
-          className="flex items-center gap-3 cursor-pointer group" 
-          onClick={() => onTabChange('dashboard')}
-          role="button"
-          tabIndex={0}
-          aria-label="Go to Dashboard"
-          onKeyDown={(e) => e.key === 'Enter' && onTabChange('dashboard')}
-        >
-          <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/20 group-hover:scale-110 transition-transform duration-300">
-            <Dashboard size={20} className="text-white" />
-          </div>
-          <h1 className="text-xl font-bold text-gray-900 tracking-tight hidden sm:block">
-            Delta<span className="text-blue-600">9</span>
-          </h1>
-        </div>
-
-        {/* Navigation Center (Desktop) */}
-        <nav className="hidden md:flex items-center gap-2" role="navigation">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => onTabChange(item.id)}
-              className={`px-5 py-2 text-xs font-bold uppercase tracking-widest rounded-xl transition-all duration-200 ${
-                activeTab === item.id
-                  ? 'text-blue-600 bg-blue-50'
-                  : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
-              }`}
-              aria-current={activeTab === item.id ? 'page' : undefined}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
-
+    <header className="h-16 bg-black/50 backdrop-blur-md border-b border-white/10 z-[100] px-4 md:px-8">
+      <div className="max-w-7xl mx-auto h-full flex items-center justify-end relative">
         {/* User Menu Right */}
         <div className="flex items-center gap-3 md:gap-5">
           {/* Notification Bell */}
@@ -131,15 +89,15 @@ const Header = ({
               onClick={() => setShowNotifications(!showNotifications)}
               className={`p-2.5 rounded-xl transition-all relative group ${
                 showNotifications 
-                  ? 'text-blue-600 bg-blue-50' 
-                  : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50'
+                  ? 'text-blue-600 bg-blue-600/10' 
+                  : 'text-white/40 hover:text-blue-600 hover:bg-blue-600/10'
               }`}
               aria-label="View Notifications"
               aria-expanded={showNotifications}
             >
               <Bell size={20} />
               {unreadCount > 0 && notificationsEnabled && (
-                <span className="absolute top-2.5 right-2.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-red-500 rounded-full border-2 border-white text-[10px] font-bold text-white shadow-sm group-hover:scale-110 transition-transform">
+                <span className="absolute top-2.5 right-2.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-red-500 rounded-full border-2 border-black text-[10px] font-bold text-white shadow-sm group-hover:scale-110 transition-transform">
                   {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
               )}
@@ -153,14 +111,14 @@ const Header = ({
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 10, scale: 0.95 }}
                   transition={{ duration: 0.2, ease: "easeOut" }}
-                  className="absolute right-0 mt-3 w-[360px] max-w-[90vw] bg-white border border-gray-100 rounded-2xl shadow-2xl overflow-hidden z-[110]"
+                  className="absolute right-0 mt-3 w-[360px] max-w-[90vw] bg-[#0A0A0A] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[110]"
                 >
                   {/* Header */}
-                  <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between bg-white/50 backdrop-blur-sm sticky top-0 z-10">
+                  <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between bg-black/50 backdrop-blur-sm sticky top-0 z-10">
                     <div className="flex items-center gap-2">
-                      <h3 className="font-bold text-sm text-gray-900">Notifications</h3>
+                      <h3 className="font-bold text-sm text-white">Notifications</h3>
                       {unreadCount > 0 && (
-                        <span className="px-1.5 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-bold rounded-md">
+                        <span className="px-1.5 py-0.5 bg-blue-600/10 text-blue-600 text-[10px] font-bold rounded-md">
                           {unreadCount} New
                         </span>
                       )}
@@ -168,12 +126,12 @@ const Header = ({
                     
                     <div className="flex items-center gap-3">
                       {/* Notifications Toggle */}
-                      <div className="flex items-center gap-2 pr-3 border-r border-gray-100">
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Alerts</span>
+                      <div className="flex items-center gap-2 pr-3 border-r border-white/5">
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-white/20">Alerts</span>
                         <button
                           onClick={() => setNotificationsEnabled(!notificationsEnabled)}
                           className={`w-8 h-4 rounded-full relative transition-colors duration-200 ${
-                            notificationsEnabled ? 'bg-blue-600' : 'bg-gray-200'
+                            notificationsEnabled ? 'bg-blue-600' : 'bg-white/10'
                           }`}
                           role="switch"
                           aria-checked={notificationsEnabled}
@@ -188,7 +146,7 @@ const Header = ({
                       {notifications.length > 0 && (
                         <button 
                           onClick={handleClearAll}
-                          className="text-gray-400 hover:text-red-500 transition-colors"
+                          className="text-white/20 hover:text-red-500 transition-colors"
                           title="Clear all"
                         >
                           <Trash2 size={16} />
@@ -198,59 +156,51 @@ const Header = ({
                   </div>
 
                   {/* List */}
-                  <div className="max-h-[400px] overflow-y-auto custom-scrollbar bg-white">
+                  <div className="max-h-[400px] overflow-y-auto custom-scrollbar bg-[#0A0A0A]">
                     {notifications.length > 0 ? (
-                      <div className="divide-y divide-gray-50">
+                      <div className="divide-y divide-white/5">
                         <AnimatePresence initial={false}>
                           {notifications.map((notif) => (
                             <motion.div
                               key={notif.id}
-                              initial={{ opacity: 0, y: 20 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0, x: 20 }}
-                              transition={{ duration: 0.3, ease: "easeOut" }}
-                              className={`group p-4 hover:bg-gray-50 transition-all cursor-pointer relative overflow-hidden ${
-                                notif.unread ? 'bg-blue-50/30' : ''
+                              initial={{ opacity: 0, x: -10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              exit={{ opacity: 0, x: 10 }}
+                              className={`group cursor-pointer hover:bg-white/5 transition-all p-4 ${
+                                notif.is_read === 0 ? 'bg-blue-600/5' : ''
                               }`}
                               onClick={() => handleItemClick(notif)}
                             >
-                              {notif.unread && (
-                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600" />
-                              )}
-                              
                               <div className="flex gap-4">
-                                <div className={`mt-1 w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border transition-colors ${
-                                  notif.unread 
-                                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
-                                    : 'bg-gray-50 text-gray-400 border-gray-100'
+                                <div className={`mt-1 w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border ${
+                                  notif.is_read === 0 
+                                    ? 'bg-blue-600/10 border-blue-600/20 text-blue-500' 
+                                    : 'bg-white/5 border-white/5 text-white/20'
                                 }`}>
-                                  <Zap size={18} className={notif.unread ? 'animate-pulse' : ''} />
+                                  <Bell size={14} />
                                 </div>
-                                
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center justify-between gap-2 mb-1">
-                                    <span className={`text-[10px] font-black uppercase tracking-widest ${
-                                      notif.unread ? 'text-blue-600' : 'text-gray-400'
-                                    }`}>
-                                      {notif.message.includes('🚨') ? 'Urgent Alert' : 'Discovery Match'}
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-blue-500">
+                                      Signal Detected
                                     </span>
-                                    <span className="text-[10px] text-gray-400 whitespace-nowrap font-bold flex items-center gap-1">
+                                    <span className="text-[9px] font-bold text-white/20 flex items-center gap-1 uppercase">
                                       <Clock size={10} />
                                       {formatTime(notif.created_at)}
                                     </span>
                                   </div>
                                   
                                   <p className={`text-xs leading-relaxed transition-colors line-clamp-2 ${
-                                    notif.unread ? 'text-gray-900 font-bold' : 'text-gray-500'
+                                    notif.is_read === 0 ? 'text-white font-bold' : 'text-white/40'
                                   }`}>
                                     {notif.message.replace('🚨 REAL-TIME ALERT: ', '').replace('URGENT: ', '')}
                                   </p>
 
                                   <div className="mt-2 flex items-center gap-2">
-                                    <div className="px-2 py-0.5 bg-gray-100 rounded text-[9px] font-bold text-gray-500 uppercase tracking-tighter">
+                                    <div className="px-2 py-0.5 bg-white/5 rounded text-[9px] font-bold text-white/20 uppercase tracking-tighter">
                                       Lead ID: {notif.lead_id.substring(0, 8)}
                                     </div>
-                                    <div className="flex-1 h-px bg-gray-50" />
+                                    <div className="flex-1 h-px bg-white/5" />
                                     <span className="text-[10px] font-bold text-blue-600 group-hover:translate-x-1 transition-transform flex items-center gap-1">
                                       View Lead <ExternalLink size={10} />
                                     </span>
@@ -263,12 +213,12 @@ const Header = ({
                       </div>
                     ) : (
                       <div className="px-8 py-12 text-center space-y-3">
-                        <div className="w-12 h-12 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto text-gray-300">
+                        <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center mx-auto text-white/10">
                           <Bell size={24} />
                         </div>
                         <div>
-                          <p className="text-sm font-bold text-gray-500">No notifications</p>
-                          <p className="text-xs text-gray-400">You're all caught up!</p>
+                          <p className="text-sm font-bold text-white/40">No notifications</p>
+                          <p className="text-xs text-white/20">You're all caught up!</p>
                         </div>
                       </div>
                     )}
@@ -276,10 +226,10 @@ const Header = ({
 
                   {/* Footer */}
                   {notifications.length > 0 && (
-                    <div className="p-3 border-t border-gray-100 bg-gray-50 text-center">
+                    <div className="p-3 border-t border-white/5 bg-black/40 text-center">
                       <button 
                         onClick={() => {
-                          onTabChange('leads');
+                          navigate('/leads');
                           setShowNotifications(false);
                         }}
                         className="text-xs font-bold text-blue-600 hover:text-blue-700 transition-colors uppercase tracking-widest"
@@ -293,33 +243,16 @@ const Header = ({
             </AnimatePresence>
           </div>
           
-          <div className="h-6 w-[1px] bg-gray-100 hidden md:block"></div>
+          <div className="h-6 w-[1px] bg-white/10 hidden md:block"></div>
 
           <button 
-            onClick={onCreateAgent}
-            className="hidden md:flex items-center gap-2.5 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest transition-all shadow-lg shadow-blue-600/20 active:scale-95"
-            aria-label="Create New Agent"
-          >
-            <Plus size={18} />
-            <span>Create Agent</span>
-          </button>
-
-          <button 
-            className="flex items-center gap-2 p-1.5 hover:bg-gray-100 rounded-2xl transition-all border border-transparent hover:border-gray-200 group"
+            onClick={() => navigate('/settings')}
+            className="flex items-center gap-2 p-1.5 hover:bg-white/5 rounded-2xl transition-all border border-transparent hover:border-white/10 group"
             aria-label="User Profile"
-            onClick={() => onTabChange('settings')}
           >
-            <div className="w-8 h-8 bg-gray-50 rounded-xl flex items-center justify-center border border-gray-100 group-hover:border-blue-600/30 transition-colors">
-              <User size={18} className="text-gray-500" />
+            <div className="w-8 h-8 bg-white/5 rounded-xl flex items-center justify-center border border-white/5 group-hover:border-blue-600/30 transition-colors">
+              <User size={18} className="text-white/40" />
             </div>
-          </button>
-
-          {/* Mobile Menu Toggle */}
-          <button 
-            className="md:hidden p-2 text-gray-500 hover:bg-gray-100 rounded-xl transition-colors"
-            aria-label="Toggle Mobile Menu"
-          >
-            <Menu size={24} />
           </button>
         </div>
       </div>

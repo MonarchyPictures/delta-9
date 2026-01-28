@@ -32,22 +32,24 @@ const LeadCard = ({ lead, onSave, onDelete, onClick }) => {
   };
 
   const getWhatsAppLink = (phone, name, snippet, location, whatsappData) => {
-    if (!phone && (!whatsappData || !whatsappData.contact)) return null;
+    const targetPhone = (whatsappData?.contact || phone);
+    if (!targetPhone) return null;
     
-    const targetPhone = (whatsappData?.contact || phone).replace(/\D/g, '');
+    const cleanPhone = targetPhone.replace(/\D/g, '');
     const defaultMsg = `Hi ${name || 'there'}, I saw your post looking for "${snippet}" in ${location || 'Nairobi'}. I have this available and can deliver today. Can I share price and details?`;
     const message = encodeURIComponent(whatsappData?.message_hint || defaultMsg);
     
-    return `https://wa.me/${targetPhone}?text=${message}`;
+    return `https://wa.me/${cleanPhone}?text=${message}`;
   };
 
+  const hasWhatsApp = !!(lead.contact_phone || (lead.whatsapp_ready_data && lead.whatsapp_ready_data.contact));
   const whatsappLink = getWhatsAppLink(lead.contact_phone, lead.buyer_name, lead.buyer_request_snippet, lead.location_raw, lead.whatsapp_ready_data);
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      onClick={() => onClick(lead)}
+      onClick={() => onClick && onClick(lead)}
       className="bg-[#0A0A0A] border border-white/5 rounded-2xl overflow-hidden hover:border-white/10 transition-all group cursor-pointer relative"
     >
       <div className="p-5">
@@ -80,8 +82,8 @@ const LeadCard = ({ lead, onSave, onDelete, onClick }) => {
           <div className="flex items-center gap-1.5 text-white/60 text-xs font-bold">
             <MapPin size={14} className="text-blue-500" />
             <span>{lead.location_raw || 'Kenya'}</span>
-            {lead.distance_km && (
-              <span className="text-white/30 ml-1">({lead.distance_km}km)</span>
+            {lead.radius_km > 0 && (
+              <span className="text-white/30 ml-1">({lead.radius_km}km)</span>
             )}
           </div>
           <div className="flex items-center gap-1.5 text-white/60 text-xs font-bold">
@@ -99,81 +101,58 @@ const LeadCard = ({ lead, onSave, onDelete, onClick }) => {
             <p className="text-[10px] font-black text-white/40 uppercase tracking-widest leading-none mb-1">Buyer Profile</p>
             <p className="text-xs font-bold text-white leading-none">{lead.buyer_name || 'Anonymous User'}</p>
           </div>
-          {lead.is_contact_verified === 1 && (
-            <span className="px-2 py-0.5 bg-green-500/10 text-green-500 text-[8px] font-black uppercase tracking-widest rounded-md border border-green-500/20">
-              Verified
-            </span>
-          )}
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex gap-2">
-          {whatsappLink ? (
-            <a 
-              href={whatsappLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="flex-1 flex items-center justify-center gap-2 bg-green-600 text-white font-black uppercase tracking-widest text-[10px] py-3 rounded-xl hover:bg-green-700 transition-all active:scale-95 shadow-lg shadow-green-600/20"
-            >
-              <MessageCircle size={16} />
-              WhatsApp
-            </a>
-          ) : lead.contact_email ? (
-            <a 
-              href={`mailto:${lead.contact_email}`}
-              onClick={(e) => e.stopPropagation()}
-              className="flex-1 flex items-center justify-center gap-2 bg-blue-600 text-white font-black uppercase tracking-widest text-[10px] py-3 rounded-xl hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-600/20"
-            >
-              <Mail size={16} />
-              Email
-            </a>
-          ) : (
-            <a 
-              href={lead.post_link}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="flex-1 flex items-center justify-center gap-2 bg-white/5 border border-white/10 text-white/40 font-black uppercase tracking-widest text-[10px] py-3 rounded-xl hover:bg-white/10 transition-all"
-            >
-              WhatsApp Unavailable
-            </a>
-          )}
-          
-          <a 
-            href={lead.post_link}
+        {/* Primary Action */}
+        {hasWhatsApp ? (
+          <a
+            href={whatsappLink}
             target="_blank"
             rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="w-12 flex items-center justify-center bg-white/5 border border-white/10 text-white hover:text-blue-400 py-3 rounded-xl hover:bg-white/10 transition-all"
-            title="View Source"
-          >
-            <ExternalLink size={18} />
-          </a>
-
-          <button 
             onClick={(e) => {
               e.stopPropagation();
-              onSave(lead.id);
+              onSave && onSave(lead.id);
             }}
-            className={`w-12 flex items-center justify-center rounded-xl border transition-all ${lead.is_saved ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' : 'bg-white/5 border-white/10 text-white/40 hover:text-white/60 hover:border-white/20'}`}
-            title="Save Lead"
+            className="w-full bg-green-600 hover:bg-green-700 text-white font-black text-xs py-4 rounded-xl flex items-center justify-center gap-2 uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-green-600/20"
           >
-            <Bookmark size={18} fill={lead.is_saved ? 'currentColor' : 'none'} />
-          </button>
+            <MessageCircle size={16} />
+            Instant WhatsApp Pitch
+          </a>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <button
+              disabled
+              className="w-full bg-white/5 text-white/20 font-black text-xs py-4 rounded-xl flex items-center justify-center gap-2 uppercase tracking-widest cursor-not-allowed border border-white/5"
+            >
+              <MessageCircle size={16} />
+              WhatsApp Not Available
+            </button>
+            <p className="text-center text-[10px] font-bold text-white/40 uppercase tracking-[0.2em]">View Profile to Find Contacts</p>
+          </div>
+        )}
 
-          {onDelete && (
+        {/* Secondary Actions Overlay */}
+        <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between">
+          <div className="flex gap-2">
             <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(lead.id);
-              }}
-              className="w-12 flex items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/40 hover:text-red-500 hover:border-red-500/30 transition-all"
-              title="Discard Lead"
+              onClick={(e) => { e.stopPropagation(); onSave && onSave(lead.id); }}
+              className="p-2 hover:bg-white/10 rounded-lg text-white/40 hover:text-white transition-colors"
+              title="Save for Later"
+            >
+              <Bookmark size={18} fill={lead.is_saved ? "currentColor" : "none"} />
+            </button>
+            <button 
+              onClick={(e) => { e.stopPropagation(); onDelete && onDelete(lead.id); }}
+              className="p-2 hover:bg-red-500/20 rounded-lg text-white/20 hover:text-red-500 transition-colors"
+              title="Hide Lead"
             >
               <Trash2 size={18} />
             </button>
-          )}
+          </div>
+          
+          <button className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:text-blue-500 transition-colors flex items-center gap-1 group/btn">
+            Full Intelligence <ExternalLink size={12} className="group-hover/btn:translate-x-0.5 group-hover/btn:-translate-y-0.5 transition-transform" />
+          </button>
         </div>
       </div>
     </motion.div>

@@ -33,6 +33,7 @@ class Lead(Base):
     latitude = Column(Float)
     longitude = Column(Float)
     radius_km = Column(Float, default=0.0)
+    created_at = Column(DateTime, server_default=func.now(), index=True) # NEW: Unified creation timestamp
     
     # Intent Data
     intent_type = Column(String, default="UNKNOWN", index=True) # BUYER, SELLER, UNCLEAR, UNKNOWN
@@ -78,6 +79,7 @@ class Lead(Base):
     peak_response_time = Column(String) # e.g. "9AM-11AM"
     
     # Contact Verification & Reliability
+    contact_phone = Column(String, index=True) # NEW: Unified contact field
     is_contact_verified = Column(Integer, default=0) # 1 if verified
     contact_reliability_score = Column(Float, default=0.0) # 0-100
     preferred_contact_method = Column(String) # "WhatsApp", "Phone", "Email", "Social"

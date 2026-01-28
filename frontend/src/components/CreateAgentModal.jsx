@@ -1,4 +1,4 @@
-import getApiUrl from '../config';
+import getApiUrl, { getApiKey } from '../config';
 import React, { useState } from 'react';
 import { AgentFailedState } from './UXStates';
 import { X, CheckCircle2, Zap, Shield, Cpu, Target, Bell, Globe, Search, Power } from 'lucide-react';
@@ -39,10 +39,12 @@ const CreateAgentModal = ({ isOpen, onClose, onSuccess }) => {
     
     try {
       const apiUrl = getApiUrl();
+      const apiKey = getApiKey();
       const response = await fetch(`${apiUrl}/agents`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-API-Key': apiKey,
         },
         body: JSON.stringify(formData),
       });

@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { Home, List, Users, Settings as SettingsIcon } from 'lucide-react';
 import Header from './Header';
 
-const Layout = ({ children, notifications, markAsRead, markAllAsRead, clearNotifications }) => {
+const Layout = ({ children, notifications, markAsRead, markAllAsRead, clearNotifications, notificationsEnabled, setNotificationsEnabled }) => {
   return (
     <div className="flex h-screen bg-black text-white font-sans overflow-hidden">
       {/* Sidebar - Desktop */}
@@ -38,6 +38,8 @@ const Layout = ({ children, notifications, markAsRead, markAllAsRead, clearNotif
           markAsRead={markAsRead} 
           markAllAsRead={markAllAsRead} 
           clearNotifications={clearNotifications}
+          notificationsEnabled={notificationsEnabled}
+          setNotificationsEnabled={setNotificationsEnabled}
         />
         <main className="flex-1 flex flex-col overflow-hidden relative">
           {children}

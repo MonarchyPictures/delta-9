@@ -13,13 +13,13 @@ export const getApiUrl = () => {
             throw new Error(errorMsg);
         }
         // Fallback for local development only if not in PROD mode
-        return "https://delta7.onrender.com"; 
+        return "http://localhost:8000"; 
     }
     return API_URL;
 };
 
 export const getApiKey = () => {
-    return import.meta.env.VITE_API_KEY || "";
+    return import.meta.env.VITE_API_KEY || "d9_prod_secret_key_2024";
 };
 
 export default getApiUrl;
