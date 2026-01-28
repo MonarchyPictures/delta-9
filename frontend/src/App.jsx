@@ -1,3 +1,4 @@
+import getApiUrl from './config';
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
@@ -5,8 +6,6 @@ import Dashboard from './views/Dashboard';
 import Leads from './views/Leads';
 import Agents from './views/Agents';
 import Settings from './views/Settings';
-import Radar from './views/Radar';
-import Protocol from './views/Protocol';
 import CreateAgentModal from './components/CreateAgentModal';
 
 const App = () => {
@@ -24,7 +23,7 @@ const App = () => {
     const timeoutId = setTimeout(() => requestController.abort(), 20000);
     
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+      const apiUrl = getApiUrl();
       const res = await fetch(`${apiUrl}/agents`, {
         signal: requestController.signal
       });
@@ -51,7 +50,7 @@ const App = () => {
   // Initial settings fetch from backend
   useEffect(() => {
     let isMounted = true;
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+    const apiUrl = getApiUrl();
 
     const fetchInitialSettings = async () => {
       const requestController = new AbortController();
@@ -110,7 +109,7 @@ const App = () => {
   // Notification Polling (Global)
   useEffect(() => {
     let isMounted = true;
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+    const apiUrl = getApiUrl();
 
     const fetchNotifications = async () => {
       const requestController = new AbortController();
@@ -150,7 +149,7 @@ const App = () => {
   }, [notificationsEnabled, soundEnabled]);
 
   const markAsRead = async (id) => {
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+    const apiUrl = getApiUrl();
     try {
       await fetch(`${apiUrl}/notifications/${id}/read`, { method: 'POST' });
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: 1 } : n));
@@ -167,7 +166,7 @@ const App = () => {
   };
 
   const clearNotifications = async () => {
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+    const apiUrl = getApiUrl();
     try {
       const res = await fetch(`${apiUrl}/notifications/clear`, { method: 'DELETE' });
       if (res.ok) {
@@ -192,9 +191,9 @@ const App = () => {
         notificationsEnabled={notificationsEnabled}
       >
         <Routes>
-          <Route path="/" element={<Radar />} />
+          <Route path="/" element={<Dashboard />} />
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/leads" element={<Leads />} />
+<Route path="/" element={<Dashboard />} />
           <Route path="/agents" element={
             <Agents 
               onCreateAgent={handleCreateAgent} 
@@ -214,7 +213,7 @@ const App = () => {
               setSoundEnabled={setSoundEnabled}
             />
           } />
-          <Route path="/protocol" element={<Protocol />} />
+          {/* Protocol hidden for prod */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <CreateAgentModal 

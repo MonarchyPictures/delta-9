@@ -1,5 +1,6 @@
+import getApiUrl from '../config';
 import React, { useState, useRef, useEffect } from 'react';
-import { Radar, Plus, User, Bell, Menu, X, Clock, Trash2, Settings } from 'lucide-react';
+import { Dashboard, Plus, User, Bell, Menu, X, Clock, Trash2, Settings } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const Header = ({ 
@@ -68,7 +69,7 @@ const Header = ({
     
     // First try to find the lead to get its post_link
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+      const apiUrl = getApiUrl();
       const res = await fetch(`${apiUrl}/leads/${notif.lead_id}`);
       if (res.ok) {
         const lead = await res.json();
@@ -97,7 +98,7 @@ const Header = ({
           onKeyDown={(e) => e.key === 'Enter' && onTabChange('dashboard')}
         >
           <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/20 group-hover:scale-110 transition-transform duration-300">
-            <Radar size={20} className="text-white" />
+            <Dashboard size={20} className="text-white" />
           </div>
           <h1 className="text-xl font-bold text-gray-900 tracking-tight hidden sm:block">
             Delta<span className="text-blue-600">9</span>

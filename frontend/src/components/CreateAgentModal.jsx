@@ -1,3 +1,4 @@
+import getApiUrl from '../config';
 import React, { useState } from 'react';
 import { AgentFailedState } from './UXStates';
 import { X, CheckCircle2, Zap, Shield, Cpu, Target, Bell, Globe, Search, Power } from 'lucide-react';
@@ -37,7 +38,7 @@ const CreateAgentModal = ({ isOpen, onClose, onSuccess }) => {
     setHasError(false);
     
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+      const apiUrl = getApiUrl();
       const response = await fetch(`${apiUrl}/agents`, {
         method: 'POST',
         headers: {

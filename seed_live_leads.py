@@ -18,7 +18,7 @@ def seed_live_leads():
             "product_category": "Furniture",
             "intent_score": 0.95,
             "confidence_score": 0.9,
-            "status": models.ContactStatus.NOT_CONTACTED,
+            "status": models.CRMStatus.NEW,
             "created_at": datetime.utcnow() - timedelta(minutes=random.randint(1, 60))
         },
         {
@@ -30,7 +30,7 @@ def seed_live_leads():
             "product_category": "Electronics",
             "intent_score": 0.88,
             "confidence_score": 0.85,
-            "status": models.ContactStatus.NOT_CONTACTED,
+            "status": models.CRMStatus.NEW,
             "created_at": datetime.utcnow() - timedelta(minutes=random.randint(1, 60))
         },
         {

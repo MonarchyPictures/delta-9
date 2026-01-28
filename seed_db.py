@@ -3,6 +3,7 @@ from app.db import models, database
 from datetime import datetime, timedelta
 import uuid
 
+
 def seed_data():
     # Create tables
     models.Base.metadata.create_all(bind=database.engine)
@@ -20,7 +21,7 @@ def seed_data():
             "buyer_request_snippet": "Looking for winter tires for my SUV, need them ASAP!",
             "product_category": "Tires",
             "intent_score": 0.9,
-            "status": models.ContactStatus.NOT_CONTACTED,
+            "status": models.CRMStatus.NEW,
             "created_at": datetime.utcnow() - timedelta(hours=2)
         },
         {
@@ -33,7 +34,7 @@ def seed_data():
             "buyer_request_snippet": "Anyone selling bulk sugar? Need 500kg for my bakery.",
             "product_category": "Sugar",
             "intent_score": 0.85,
-            "status": models.ContactStatus.NOT_CONTACTED,
+status=models.CRMStatus.NEW,
             "created_at": datetime.utcnow() - timedelta(hours=24)
         },
         {
@@ -63,6 +64,7 @@ def seed_data():
         db.rollback()
     finally:
         db.close()
+
 
 if __name__ == "__main__":
     seed_data()
