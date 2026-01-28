@@ -29,6 +29,7 @@ class Lead(Base):
     
     # Geolocation
     location_raw = Column(String)
+    property_country = Column(String, default="Kenya", index=True)
     latitude = Column(Float)
     longitude = Column(Float)
     radius_km = Column(Float, default=0.0)

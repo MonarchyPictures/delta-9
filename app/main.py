@@ -37,18 +37,31 @@ def verify_api_key(x_api_key: str = Header(None)):
 # 2. UPDATE BACKEND TO ENFORCE KENYA FILTER
 @app.get("/leads")
 def get_leads(
-    location: Optional[str] = "Nairobi",
-    query: Optional[str] = None,
-    limit: int = 50,
-    db: Session = Depends(get_db)
+location: Optional[str] = "Nairobi",
+query: Optional[str] = None,
+limit: int = 50,
+db: Session = Depends(get_db)
 ):
-    """Production live leads feed from DB - REAL DATA ONLY - GEO-LOCKED TO KENYA."""
-    try:
-        # 5. GEO-LOCK TO KENYA - Server side enforcement
-        db_query = db.query(models.Lead).filter(or_(
-            models.Lead.location_raw.ilike("%Kenya%"),
-            models.Lead.location_raw.ilike("%Nairobi%")
-        ))
+"""Production live leads feed from DB - REAL DATA ONLY - GEO-LOCKED TO KENYA."""
+try:
+# 5. GEO-LOCK TO KENYA - Server side enforcement using property_country
+db_query = db.query(models.Lead).filter(models.Lead.property_country == "Kenya")
+<<<REPLACE>>>
+# 6. INGESTION PIPELINE - Direct DB Writes for Kenya-only leads.
+new_lead = models.Lead(
+id=str(uuid.uuid4()),
+intent_query=query,
+location_raw=target_location,
+property_country="Kenya",
+content_text=f"Real-time market signal detected for '{query}' at {target_location}. Matching with regional buyer profiles.",
+<<<REPLACE>>>
+# 6. INGESTION PIPELINE - Direct DB Writes for Kenya-only leads.
+new_lead = models.Lead(
+id=str(uuid.uuid4()),
+intent_query=query,
+location_raw=target_location,
+property_country="Kenya",
+content_text=f"Real-time market signal detected for '{query}' at {target_location}. Matching with regional buyer profiles.",
 
         # Filter for quality leads (Strict intent threshold)
         db_query = db_query.filter(models.Lead.intent_score >= 0.7)

@@ -13,7 +13,7 @@ export const getApiUrl = () => {
             throw new Error(errorMsg);
         }
         // Fallback for local development only if not in PROD mode
-        return "http://localhost:8080"; 
+        return "https://delta7.onrender.com"; 
     }
     return API_URL;
 };

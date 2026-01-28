@@ -111,14 +111,15 @@ def specialops_mission_task(query: str, location: str = "Kenya", agent_id: int =
 
                 # Create lead record
                 lead = models.Lead(
-                    id=normalized["id"],
-                    source_platform=normalized["source_platform"],
-                    post_link=normalized["post_link"],
-                    timestamp=normalized.get("timestamp", datetime.now()),
-                    location_raw=normalized.get("location_raw"),
-                    latitude=normalized.get("latitude"),
-                    longitude=normalized.get("longitude"),
-                    buyer_request_snippet=normalized["buyer_request_snippet"],
+                id=normalized["id"],
+                source_platform=normalized["source_platform"],
+                post_link=normalized["post_link"],
+                timestamp=normalized.get("timestamp", datetime.now()),
+                location_raw=normalized.get("location_raw"),
+                property_country="Kenya",
+                latitude=normalized.get("latitude"),
+                longitude=normalized.get("longitude"),
+                buyer_request_snippet=normalized["buyer_request_snippet"],
                     product_category=normalized["product_category"],
                     buyer_name=normalized.get("buyer_name", "Anonymous"),
                     intent_score=normalized["intent_score"],
