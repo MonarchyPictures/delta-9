@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "delta9-frontend",
   "private": true,
   "version": "0.0.0",
@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --port 3000 --host",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "render-build": "npm install && npm run build"
   },
   "dependencies": {
     "framer-motion": "^12.29.0",
