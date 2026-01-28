@@ -6,9 +6,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 from .db import models, database
-from .db.database import get_db
+from .db.database import get_db, engine
+
+# Create tables on startup
+models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Delta9 Production API", version="1.0.0")
+
+print("--- Delta9 API Starting Up ---")
+print(f"--- Database URL present: {bool(os.getenv('DATABASE_URL'))} ---")
 
 # 8. SECURITY & PRODUCTION HARDENING
 # Secure routes and use environment variables for keys/DB
