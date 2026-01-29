@@ -15,18 +15,33 @@ const App = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [agents, setAgents] = useState([]);
   const [loadingAgents, setLoadingAgents] = useState(false);
+  const agentsControllerRef = React.useRef(null);
 
   const fetchAgents = async (isSilent = false) => {
+    // Skip if a request is already in progress to avoid console noise from aborts
+    if (agentsControllerRef.current) {
+      // If it's a silent request and one is already running, just skip
+      if (isSilent) return;
+      // If it's a foreground request, we'll let the existing one finish rather than aborting it
+      // unless it's been running for too long.
+      return; 
+    }
+
     if (!isSilent) setLoadingAgents(true);
     
-    const requestController = new AbortController();
-    const timeoutId = setTimeout(() => requestController.abort(), 20000);
+    const controller = new AbortController();
+    agentsControllerRef.current = controller;
+    const timeoutId = setTimeout(() => {
+      if (agentsControllerRef.current === controller) {
+        controller.abort();
+      }
+    }, 20000);
     
     try {
       const apiUrl = getApiUrl();
       const apiKey = getApiKey();
       const res = await fetch(`${apiUrl}/agents`, {
-        signal: requestController.signal,
+        signal: controller.signal,
         headers: {
           'X-API-Key': apiKey
         }
@@ -38,10 +53,14 @@ const App = () => {
       }
     } catch (err) {
       clearTimeout(timeoutId);
+      // AbortError is expected, don't log it
       if (err.name === 'AbortError') return;
-      console.error("Fetch agents error:", err);
+      if (!isSilent) console.error("Fetch agents error:", err);
     } finally {
       if (!isSilent) setLoadingAgents(false);
+      if (agentsControllerRef.current === controller) {
+        agentsControllerRef.current = null;
+      }
     }
   };
 
@@ -118,27 +137,40 @@ const App = () => {
   useEffect(() => {
     let isMounted = true;
     const apiUrl = getApiUrl();
+    const apiKey = getApiKey();
+    let pollTimer = null;
+    const activeControllerRef = { current: null };
 
     const fetchNotifications = async () => {
-      const requestController = new AbortController();
-      const timeoutId = setTimeout(() => requestController.abort(), 10000);
+      // If a request is already in progress, simply skip this poll cycle
+      if (activeControllerRef.current || !isMounted) return;
+      
+      const controller = new AbortController();
+      activeControllerRef.current = controller;
+      
+      // Use a slightly longer timeout to allow network latency in Kenya
+      const timeoutId = setTimeout(() => {
+        if (activeControllerRef.current === controller) {
+          controller.abort();
+        }
+      }, 25000); 
 
       try {
-        const apiKey = getApiKey();
         const res = await fetch(`${apiUrl}/notifications`, {
-          signal: requestController.signal,
-          headers: {
-            'X-API-Key': apiKey
+          signal: controller.signal,
+          headers: { 
+            'X-API-Key': apiKey,
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
           }
         });
+        
         clearTimeout(timeoutId);
         if (res.ok && isMounted) {
           const data = await res.json();
-          
           setNotifications(prev => {
             const unreadCount = data.filter(n => n.is_read === 0).length;
             const prevUnreadCount = prev.filter(n => n.is_read === 0).length;
-            
             if (notificationsEnabled && soundEnabled && unreadCount > prevUnreadCount) {
               playBeep();
             }
@@ -147,16 +179,27 @@ const App = () => {
         }
       } catch (err) {
         clearTimeout(timeoutId);
-        if (err.name === 'AbortError' || !isMounted) return;
-        console.error('Notification poll error:', err);
+        // SILENT CATCH: Never log AbortError or standard failures during polling to keep console clean
+        // The ERR_ABORTED is expected when we cancel previous requests or timeout
+      } finally {
+        if (activeControllerRef.current === controller) {
+          activeControllerRef.current = null;
+        }
+        // Schedule next poll only if still mounted
+        if (isMounted) {
+          pollTimer = setTimeout(fetchNotifications, 30000);
+        }
       }
     };
 
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 15000); 
+
     return () => {
       isMounted = false;
-      clearInterval(interval);
+      if (pollTimer) clearTimeout(pollTimer);
+      if (activeControllerRef.current) {
+        activeControllerRef.current.abort();
+      }
     };
   }, [notificationsEnabled, soundEnabled]);
 

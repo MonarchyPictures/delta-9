@@ -2,8 +2,9 @@ import React from 'react';
 import { Phone, Bookmark, ExternalLink, MapPin, Clock, Flame, ShieldCheck, Mail, MessageCircle, User, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-const LeadCard = ({ lead, onSave, onDelete, onClick }) => {
+const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange }) => {
   const timeAgo = (date) => {
+    if (!date) return "N/A";
     const seconds = Math.floor((new Date() - new Date(date)) / 1000);
     let interval = seconds / 31536000;
     if (interval > 1) return Math.floor(interval) + "y ago";
@@ -31,100 +32,148 @@ const LeadCard = ({ lead, onSave, onDelete, onClick }) => {
     }
   };
 
-  const getWhatsAppLink = (phone, name, snippet, location, whatsappData) => {
-    const targetPhone = (whatsappData?.contact || phone);
-    if (!targetPhone) return null;
-    
-    const cleanPhone = targetPhone.replace(/\D/g, '');
-    const defaultMsg = `Hi ${name || 'there'}, I saw your post looking for "${snippet}" in ${location || 'Nairobi'}. I have this available and can deliver today. Can I share price and details?`;
-    const message = encodeURIComponent(whatsappData?.message_hint || defaultMsg);
-    
-    return `https://wa.me/${cleanPhone}?text=${message}`;
-  };
+  const hasWhatsApp = !!lead.phone;
+  const whatsappLink = lead.whatsapp_link;
 
-  const hasWhatsApp = !!(lead.contact_phone || (lead.whatsapp_ready_data && lead.whatsapp_ready_data.contact));
-  const whatsappLink = getWhatsAppLink(lead.contact_phone, lead.buyer_name, lead.buyer_request_snippet, lead.location_raw, lead.whatsapp_ready_data);
+  const displayPhone = (phone) => {
+    if (!phone) return null;
+    // Handle format 2547XXXXXXXX
+    if (phone.startsWith('254') && phone.length === 12) {
+      return `+254 ${phone.slice(3, 5)} ${phone.slice(5, 8)} ${phone.slice(8)}`;
+    }
+    return phone;
+  };
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      onClick={() => onClick && onClick(lead)}
-      className="bg-[#0A0A0A] border border-white/5 rounded-2xl overflow-hidden hover:border-white/10 transition-all group cursor-pointer relative"
+      onClick={() => {
+        if (hasWhatsApp) {
+          window.open(whatsappLink, '_blank');
+          onStatusChange && onStatusChange(lead.lead_id, 'contacted');
+        } else if (lead.source_url) {
+          window.open(lead.source_url, '_blank');
+        }
+      }}
+      className="bg-[#0A0A0A] border border-white/5 rounded-2xl overflow-hidden hover:border-blue-500/50 transition-all group cursor-pointer relative"
     >
-      {/* Proof of Life Badge */}
-      {lead.source_url && (
-        <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-blue-600/10 border border-blue-500/20 px-2 py-1 rounded-md z-10">
-          <span className="flex h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse"></span>
-          <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest">LIVE</span>
-        </div>
-      )}
       <div className="p-5">
         {/* Top Badges */}
         <div className="flex justify-between items-center mb-4">
           <div className="flex gap-2">
-            <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest border ${getStatusColor(lead.status)}`}>
-              {lead.status || 'NEW'}
-            </span>
-            {(lead.is_hot_lead === 1 || lead.intent_score >= 0.8) && (
+            <select
+              value={lead.status || 'new'}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => onStatusChange && onStatusChange(lead.lead_id, e.target.value)}
+              className={`px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest border bg-transparent focus:outline-none cursor-pointer ${getStatusColor(lead.status)}`}
+            >
+              <option value="new" className="bg-neutral-900">NEW</option>
+              <option value="contacted" className="bg-neutral-900">CONTACTED</option>
+              <option value="replied" className="bg-neutral-900">REPLIED</option>
+              <option value="negotiating" className="bg-neutral-900">NEGOTIATING</option>
+              <option value="converted" className="bg-neutral-900">CONVERTED</option>
+              <option value="dead" className="bg-neutral-900">DEAD</option>
+            </select>
+            {lead.intent_strength >= 0.85 && (
               <span className="px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest border border-red-500/30 bg-red-500/10 text-red-500 flex items-center gap-1">
                 <Flame size={10} className="animate-pulse" />
-                {lead.is_hot_lead === 1 ? 'HOT LEAD' : 'Buying Now'}
+                HOT
+              </span>
+            )}
+            {lead.phone && (
+              <span className="px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest border border-green-500/30 bg-green-500/10 text-green-500 flex items-center gap-1">
+                <ShieldCheck size={10} />
+                VERIFIED
+              </span>
+            )}
+            {lead.contact_source === 'inferred' && !lead.phone && (
+              <span className="px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest border border-blue-500/30 bg-blue-500/10 text-blue-500 flex items-center gap-1">
+                <ExternalLink size={10} />
+                INFERRED
               </span>
             )}
           </div>
           <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest flex items-center gap-1">
             <Clock size={10} />
-            {timeAgo(lead.created_at)}
+            {timeAgo(lead.timestamp)}
           </span>
         </div>
 
-        {/* Buyer Intent Text (Bold, First) */}
-        <h3 className="text-white font-black text-xl leading-tight group-hover:text-blue-400 transition-colors mb-4 italic">
-          "{lead.buyer_request_snippet}"
-        </h3>
+        {/* User Info - ENRICHED */}
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-white font-black text-sm italic">
+            {lead.buyer_name?.charAt(0) || 'V'}
+          </div>
+          <div>
+            <div className="text-white font-bold text-sm flex items-center gap-2">
+              {lead.buyer_name || 'Verified Market Signal'}
+              {lead.phone && <span className="text-green-500"><ShieldCheck size={12} /></span>}
+            </div>
+            <div className="text-white/40 text-[10px] font-black uppercase tracking-widest">
+              {lead.phone ? displayPhone(lead.phone) : 'Contact via Platform'}
+            </div>
+          </div>
+        </div>
 
-        {/* Location + Distance */}
-        <div className="flex items-center gap-4 mb-4">
+        {/* Product + Intent Text - READ */}
+        <div className="mb-4">
+          <div className="text-blue-500 text-[11px] font-black uppercase tracking-[0.2em] mb-1">{lead.product || 'General Request'}</div>
+          <h3 className="text-white font-black text-xl leading-tight group-hover:text-blue-400 transition-colors italic">
+            "Looking for {lead.product}{lead.quantity ? ` (${lead.quantity})` : ''}"
+          </h3>
+          {lead.buyer_request_snippet && (
+            <p className="text-white/40 text-xs mt-2 line-clamp-2 italic font-medium leading-relaxed">
+              ...{lead.buyer_request_snippet.substring(0, 150)}...
+            </p>
+          )}
+        </div>
+
+        {/* Location + Source */}
+        <div className="flex items-center gap-4 mb-6">
           <div className="flex items-center gap-1.5 text-white/60 text-xs font-bold">
             <MapPin size={14} className="text-blue-500" />
-            <span>{lead.location_raw || 'Kenya'}</span>
-            {lead.radius_km > 0 && (
-              <span className="text-white/30 ml-1">({lead.radius_km}km)</span>
+            <span>{lead.location || 'Kenya'}</span>
+            {lead.distance_km > 0 && (
+              <span className="text-white/30 ml-1">({lead.distance_km}km)</span>
             )}
           </div>
-          <div className="flex items-center gap-1.5 text-white/60 text-xs font-bold">
-            <ShieldCheck size={14} className="text-green-500" />
-            <span>{lead.source_platform}</span>
+          <div className="flex items-center gap-1.5 text-white/40 text-[10px] font-black uppercase tracking-widest">
+            <span>{lead.source}</span>
           </div>
+          {lead.source_url && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                window.open(lead.source_url, '_blank');
+              }}
+              className="ml-auto text-blue-500 hover:text-blue-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-1 transition-colors"
+            >
+              <ExternalLink size={12} />
+              SOURCE
+            </button>
+          )}
         </div>
 
-        {/* Buyer Info */}
-        <div className="flex items-center gap-2 mb-6 p-2.5 bg-white/5 rounded-xl border border-white/5">
-          <div className="w-8 h-8 rounded-full bg-blue-600/20 flex items-center justify-center text-blue-400 border border-blue-500/20">
-            <User size={16} />
-          </div>
-          <div className="flex-1">
-            <p className="text-[10px] font-black text-white/40 uppercase tracking-widest leading-none mb-1">Buyer Profile</p>
-            <p className="text-xs font-bold text-white leading-none">{lead.buyer_name || 'Anonymous User'}</p>
-          </div>
-        </div>
-
-        {/* Primary Action */}
+        {/* Primary Action - TAP */}
         {hasWhatsApp ? (
-          <a
-            href={whatsappLink}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            className="w-full bg-green-600 group-hover:bg-green-500 text-white font-black text-sm py-4 rounded-xl flex items-center justify-center gap-3 uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-green-600/20"
+          >
+            <MessageCircle size={20} fill="white" />
+            TAP TO WHATSAPP
+          </button>
+        ) : lead.source_url ? (
+          <button
             onClick={(e) => {
               e.stopPropagation();
-              onSave && onSave(lead.id);
+              window.open(lead.source_url, '_blank');
             }}
-            className="w-full bg-green-600 hover:bg-green-700 text-white font-black text-xs py-4 rounded-xl flex items-center justify-center gap-2 uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-green-600/20"
+            className="w-full bg-blue-600 group-hover:bg-blue-500 text-white font-black text-sm py-4 rounded-xl flex items-center justify-center gap-3 uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-blue-600/20"
           >
-            <MessageCircle size={16} />
-            Instant WhatsApp Pitch
-          </a>
+            <ExternalLink size={20} />
+            OPEN SOURCE PLATFORM
+          </button>
         ) : (
           <div className="flex flex-col gap-2">
             <button
@@ -132,56 +181,8 @@ const LeadCard = ({ lead, onSave, onDelete, onClick }) => {
               className="w-full bg-white/5 text-white/20 font-black text-xs py-4 rounded-xl flex items-center justify-center gap-2 uppercase tracking-widest cursor-not-allowed border border-white/5"
             >
               <MessageCircle size={16} />
-              WhatsApp Not Available
+              NO CONTACT LINK
             </button>
-            <p className="text-center text-[10px] font-bold text-white/40 uppercase tracking-[0.2em]">View Profile to Find Contacts</p>
-          </div>
-        )}
-
-        {/* Secondary Actions Overlay */}
-        <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between">
-          <div className="flex gap-2">
-            <button 
-              onClick={(e) => { e.stopPropagation(); onSave && onSave(lead.id); }}
-              className="p-2 hover:bg-white/10 rounded-lg text-white/40 hover:text-white transition-colors"
-              title="Save for Later"
-            >
-              <Bookmark size={18} fill={lead.is_saved ? "currentColor" : "none"} />
-            </button>
-            <button 
-              onClick={(e) => { e.stopPropagation(); onDelete && onDelete(lead.id); }}
-              className="p-2 hover:bg-red-500/20 rounded-lg text-white/20 hover:text-red-500 transition-colors"
-              title="Hide Lead"
-            >
-              <Trash2 size={18} />
-            </button>
-          </div>
-          
-          <button className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:text-blue-500 transition-colors flex items-center gap-1 group/btn">
-            Full Intelligence <ExternalLink size={12} className="group-hover/btn:translate-x-0.5 group-hover/btn:-translate-y-0.5 transition-transform" />
-          </button>
-        </div>
-        {/* Proof of Life Metadata Footer */}
-        {lead.source_url && (
-          <div className="mt-4 pt-4 border-t border-white/5 flex flex-wrap gap-4 items-center justify-between text-[10px] font-medium text-white/30 uppercase tracking-widest">
-            <div className="flex items-center gap-4">
-              <span className="flex items-center gap-1">
-                <ExternalLink size={10} className="text-blue-500" />
-                Source: <span className="text-white/60 truncate max-w-[150px]">{lead.source_url}</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <Clock size={10} />
-                Fetched: <span className="text-white/60">{lead.request_timestamp ? new Date(lead.request_timestamp).toLocaleTimeString() : 'N/A'}</span>
-              </span>
-            </div>
-            <div className="flex items-center gap-4">
-              <span className="flex items-center gap-1">
-                Status: <span className={lead.http_status === 200 ? "text-green-500" : "text-red-500"}>{lead.http_status || 200}</span>
-              </span>
-              <span className="flex items-center gap-1">
-                Latency: <span className="text-white/60">{lead.latency_ms || 0}ms</span>
-              </span>
-            </div>
           </div>
         )}
       </div>

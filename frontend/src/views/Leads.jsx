@@ -1,5 +1,5 @@
 import getApiUrl, { getApiKey } from '../config';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, MapPin, Filter, Database, Clock, Zap, MessageSquare } from 'lucide-react';
 import LeadCard from '../components/LeadCard';
 
@@ -7,22 +7,57 @@ const Leads = () => {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [location, setLocation] = useState('Nairobi');
   const [radius, setRadius] = useState('');
   const [timeRange, setTimeRange] = useState('');
-  const [highIntent, setHighIntent] = useState(false);
-  const [hasWhatsapp, setHasWhatsapp] = useState(false);
+  const [highIntent, setHighIntent] = useState(true); // Default to TRUE
+  const [hasWhatsapp, setHasWhatsapp] = useState(true); // Default to TRUE
   const [lastUpdated, setLastUpdated] = useState(new Date());
+  const [error, setError] = useState(null);
+  
+  const abortControllerRef = useRef(null);
+
+  // Debounce query
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [query]);
 
   const fetchLeads = useCallback(async (isPolling = false) => {
+    // If a request is already in progress:
+    if (abortControllerRef.current) {
+      if (isPolling) {
+        // If it's a polling request, skip to avoid overlapping/noise
+        return;
+      } else {
+        // If it's a foreground request (user search/filter), abort the previous one
+        // because we need the new results immediately.
+        abortControllerRef.current.abort();
+      }
+    }
+
     if (!isPolling) setLoading(true);
+    setError(null);
+    
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    
+    const timeoutId = setTimeout(() => {
+      if (abortControllerRef.current === controller) {
+        controller.abort();
+      }
+    }, 30000);
+
     try {
       const apiUrl = getApiUrl();
       const apiKey = getApiKey();
       
       const params = new URLSearchParams({
         location,
-        query,
+        query: debouncedQuery,
         limit: 50
       });
 
@@ -32,22 +67,54 @@ const Leads = () => {
       if (hasWhatsapp) params.append('has_whatsapp', 'true');
 
       const res = await fetch(`${apiUrl}/leads?${params.toString()}`, {
+        signal: controller.signal,
         headers: {
           'X-API-Key': apiKey
         },
-        cache: 'no-store' // ENFORCED: No cached data
+        cache: 'no-store'
       });
+      
+      clearTimeout(timeoutId);
       if (res.ok) {
         const data = await res.json();
         setLeads(data);
         setLastUpdated(new Date());
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server error: ${res.status}`);
       }
     } catch (err) {
-      console.error("Fetch leads failed:", err);
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') return;
+      if (!isPolling) {
+        console.error("Fetch leads failed:", err);
+        setError(err.message);
+      }
     } finally {
       if (!isPolling) setLoading(false);
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
     }
-  }, [location, query, radius, timeRange, highIntent, hasWhatsapp]);
+  }, [location, debouncedQuery, radius, timeRange, highIntent, hasWhatsapp]);
+
+  const handleStatusChange = async (leadId, newStatus) => {
+    try {
+      const apiUrl = getApiUrl();
+      const apiKey = getApiKey();
+      const res = await fetch(`${apiUrl}/leads/${leadId}/status?status=${newStatus}`, {
+        method: 'PATCH',
+        headers: {
+          'X-API-Key': apiKey
+        }
+      });
+      if (res.ok) {
+        setLeads(prev => prev.map(l => l.lead_id === leadId ? { ...l, status: newStatus } : l));
+      }
+    } catch (err) {
+      console.error("Status update failed:", err);
+    }
+  };
 
   useEffect(() => {
     fetchLeads();
@@ -61,10 +128,10 @@ const Leads = () => {
         <div className="flex flex-col space-y-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="space-y-1">
-              <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase">Market Signals <span className="text-blue-600 text-lg not-italic align-top ml-2">KENYA ONLY</span></h1>
-              <div className="flex items-center gap-2 text-white/40 text-xs font-medium uppercase tracking-widest">
-                <span className="flex h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
-                Live Intelligence Stream • Updated {Math.floor((new Date() - lastUpdated) / 1000)}s ago
+              <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase">Market Signals <span className="text-blue-600 text-lg not-italic align-top ml-2">LIVE KENYA</span></h1>
+              <div className="flex items-center gap-2 text-white/40 text-[10px] font-black uppercase tracking-widest">
+                <span className="flex h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                NO COLD LEADS • NO FAKE DATA • NO GUESSING
               </div>
             </div>
             
@@ -72,23 +139,22 @@ const Leads = () => {
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/20 group-focus-within:text-blue-500 transition-colors" />
               <input 
                 type="text" 
-                placeholder="Search keywords (e.g. 'tires', 'tanks')..."
+                placeholder="READ: Search keywords..."
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-4 py-3 text-white text-base focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
+                className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-4 py-3 text-white text-base focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all font-bold italic"
               />
             </div>
           </div>
 
-          {/* Advanced Filters Bar */}
+          {/* Precision Filters Bar */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            {/* Radius Filter */}
             <div className="relative">
               <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
               <select 
                 value={radius}
                 onChange={(e) => setRadius(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-white text-sm focus:outline-none appearance-none cursor-pointer hover:bg-white/10 transition-colors"
+                className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-white text-xs font-black uppercase tracking-widest focus:outline-none appearance-none cursor-pointer hover:bg-white/10 transition-colors"
               >
                 <option value="" className="bg-neutral-900">Any Radius</option>
                 <option value="5" className="bg-neutral-900">5km (Local)</option>
@@ -97,13 +163,12 @@ const Leads = () => {
               </select>
             </div>
 
-            {/* Time Filter */}
             <div className="relative">
               <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
               <select 
                 value={timeRange}
                 onChange={(e) => setTimeRange(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-white text-sm focus:outline-none appearance-none cursor-pointer hover:bg-white/10 transition-colors"
+                className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-white text-xs font-black uppercase tracking-widest focus:outline-none appearance-none cursor-pointer hover:bg-white/10 transition-colors"
               >
                 <option value="" className="bg-neutral-900">Any Time</option>
                 <option value="1h" className="bg-neutral-900">Last 1h</option>
@@ -112,38 +177,50 @@ const Leads = () => {
               </select>
             </div>
 
-            {/* Intent Filter */}
             <button 
               onClick={() => setHighIntent(!highIntent)}
-              className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border transition-all text-sm font-bold ${
+              className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border transition-all text-xs font-black uppercase tracking-widest ${
                 highIntent 
-                  ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-600/20' 
-                  : 'bg-white/5 border-white/10 text-white/40 hover:bg-white/10'
+                  ? 'bg-red-600 border-red-600 text-white shadow-lg shadow-red-600/20' 
+                  : 'bg-white/5 border-white/10 text-white/20 hover:bg-white/10'
               }`}
             >
-              <Zap size={16} />
-              <span>High Intent</span>
+              <Zap size={14} />
+              <span>Hot Only</span>
             </button>
 
-            {/* WhatsApp Filter */}
             <button 
               onClick={() => setHasWhatsapp(!hasWhatsapp)}
-              className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border transition-all text-sm font-bold ${
+              className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border transition-all text-xs font-black uppercase tracking-widest ${
                 hasWhatsapp 
                   ? 'bg-green-600 border-green-600 text-white shadow-lg shadow-green-600/20' 
-                  : 'bg-white/5 border-white/10 text-white/40 hover:bg-white/10'
+                  : 'bg-white/5 border-white/10 text-white/20 hover:bg-white/10'
               }`}
             >
-              <MessageSquare size={16} />
+              <MessageSquare size={14} />
               <span>WhatsApp Only</span>
             </button>
 
-            {/* Reset/Status */}
             <div className="hidden md:flex items-center justify-center text-[10px] font-black uppercase tracking-widest text-white/20">
-              {leads.length} Signals Found
+              {leads.length} LIVE SIGNALS
             </div>
           </div>
         </div>
+
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 text-red-500 text-sm font-bold flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Zap size={16} className="animate-pulse" />
+              <span>{error}</span>
+            </div>
+            <button 
+              onClick={() => fetchLeads()}
+              className="px-4 py-1.5 bg-red-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-red-400 transition-colors"
+            >
+              Retry Sync
+            </button>
+          </div>
+        )}
 
         {loading && leads.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-32 space-y-4">
@@ -154,7 +231,7 @@ const Leads = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {leads.length > 0 ? (
               leads.map((lead) => (
-                <LeadCard key={lead.id} lead={lead} />
+                <LeadCard key={lead.lead_id} lead={lead} onStatusChange={handleStatusChange} />
               ))
             ) : null}
           </div>
