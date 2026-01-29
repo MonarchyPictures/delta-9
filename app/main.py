@@ -7,13 +7,30 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 from .db import models, database
 from .db.database import get_db, engine
+from .ingestion import LiveLeadIngestor
+from apscheduler.schedulers.background import BackgroundScheduler
 
 # Create tables on startup
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Delta9 Production API", version="1.0.0")
 
-print("--- Delta9 API Starting Up ---")
+# Setup Scheduler for Live Ingestion
+scheduler = BackgroundScheduler()
+
+def fetch_live_leads_job():
+    db = next(get_db())
+    try:
+        ingestor = LiveLeadIngestor(db)
+        ingestor.run_full_cycle()
+    finally:
+        db.close()
+
+# Run ingestion every 15 minutes in production
+scheduler.add_job(fetch_live_leads_job, 'interval', minutes=15)
+scheduler.start()
+
+print("--- Delta9 API Starting Up with Background Scheduler ---")
 print(f"--- Database URL present: {bool(os.getenv('DATABASE_URL'))} ---")
 
 # 8. SECURITY & PRODUCTION HARDENING

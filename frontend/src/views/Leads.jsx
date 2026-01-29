@@ -12,6 +12,7 @@ const Leads = () => {
   const [timeRange, setTimeRange] = useState('');
   const [highIntent, setHighIntent] = useState(false);
   const [hasWhatsapp, setHasWhatsapp] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(new Date());
 
   const fetchLeads = useCallback(async (isPolling = false) => {
     if (!isPolling) setLoading(true);
@@ -38,6 +39,7 @@ const Leads = () => {
       if (res.ok) {
         const data = await res.json();
         setLeads(data);
+        setLastUpdated(new Date());
       }
     } catch (err) {
       console.error("Fetch leads failed:", err);
@@ -57,7 +59,13 @@ const Leads = () => {
       <div className="max-w-7xl mx-auto space-y-8">
         <div className="flex flex-col space-y-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase">Market Signals <span className="text-blue-600 text-lg not-italic align-top ml-2">KENYA ONLY</span></h1>
+            <div className="space-y-1">
+              <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase">Market Signals <span className="text-blue-600 text-lg not-italic align-top ml-2">KENYA ONLY</span></h1>
+              <div className="flex items-center gap-2 text-white/40 text-xs font-medium uppercase tracking-widest">
+                <span className="flex h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
+                Live Intelligence Stream • Updated {Math.floor((new Date() - lastUpdated) / 1000)}s ago
+              </div>
+            </div>
             
             <div className="relative group w-full md:w-96">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/20 group-focus-within:text-blue-500 transition-colors" />
