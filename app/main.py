@@ -11,7 +11,13 @@ from .ingestion import LiveLeadIngestor
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # Create tables on startup
-models.Base.metadata.create_all(bind=engine)
+try:
+    print(f"--- Attempting database connection and table creation ---")
+    models.Base.metadata.create_all(bind=engine)
+    print("--- Database initialized successfully ---")
+except Exception as e:
+    print(f"--- Database initialization FAILED: {str(e)} ---")
+    # Don't exit yet, let the app try to start, though DB operations will fail
 
 app = FastAPI(title="Delta9 Production API", version="1.0.0")
 
