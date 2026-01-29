@@ -27,8 +27,30 @@ scheduler = BackgroundScheduler()
 def fetch_live_leads_job():
     db = next(get_db())
     try:
+        print("--- Background Job: Starting Agent-Based Ingestion ---")
         ingestor = LiveLeadIngestor(db)
-        ingestor.run_full_cycle()
+        
+        # Get all active agents
+        active_agents = db.query(models.Agent).filter(models.Agent.is_active == 1).all()
+        
+        if not active_agents:
+            print("--- Background Job: No active agents found, running random cycle ---")
+            ingestor.run_full_cycle()
+        else:
+            print(f"--- Background Job: Running cycles for {len(active_agents)} active agents ---")
+            for agent in active_agents:
+                print(f"--- Background Job: Fetching for Agent '{agent.name}' (Query: {agent.query}) ---")
+                leads = ingestor.fetch_from_external_sources(agent.query, agent.location)
+                if leads:
+                    ingestor.save_leads_to_db(leads)
+                
+                # Update last_run
+                agent.last_run = datetime.utcnow()
+                db.commit()
+                
+        print("--- Background Job: Finished Ingestion Cycle ---")
+    except Exception as e:
+        print(f"--- Background Job ERROR: {str(e)} ---")
     finally:
         db.close()
 
@@ -191,20 +213,40 @@ def get_agents(db: Session = Depends(get_db)):
 
 @app.post("/agents", dependencies=[Depends(verify_api_key)])
 async def create_agent(request: Request, db: Session = Depends(get_db)):
-    data = await request.json()
-    new_agent = models.Agent(
-        name=data.get("name"),
-        query=data.get("query"),
-        location=data.get("location", "Kenya"),
-        radius=data.get("radius", 50),
-        min_intent_score=data.get("min_intent_score", 0.7),
-        is_active=data.get("is_active", 1),
-        enable_alerts=data.get("enable_alerts", 1)
-    )
-    db.add(new_agent)
-    db.commit()
-    db.refresh(new_agent)
-    return new_agent
+    try:
+        data = await request.json()
+        print(f"--- Creating Agent: {data.get('name')} ---")
+        
+        new_agent = models.Agent(
+            name=data.get("name"),
+            query=data.get("query"),
+            location=data.get("location", "Kenya"),
+            radius=data.get("radius", 50),
+            min_intent_score=data.get("min_intent_score", 0.7),
+            is_active=data.get("is_active", 1),
+            enable_alerts=data.get("enable_alerts", 1)
+        )
+        db.add(new_agent)
+        db.commit()
+        db.refresh(new_agent)
+        
+        # Trigger an immediate search for this new agent in the background
+        print(f"--- Triggering immediate search for new agent: {new_agent.name} ---")
+        try:
+            ingestor = LiveLeadIngestor(db)
+            leads = ingestor.fetch_from_external_sources(new_agent.query, new_agent.location)
+            if leads:
+                ingestor.save_leads_to_db(leads)
+            new_agent.last_run = datetime.utcnow()
+            db.commit()
+        except Exception as ingest_err:
+            print(f"--- Initial ingestion failed for agent {new_agent.name}: {str(ingest_err)} ---")
+            # Don't fail the agent creation if ingestion fails
+            
+        return new_agent
+    except Exception as e:
+        print(f"--- ERROR creating agent: {str(e)} ---")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/notifications", dependencies=[Depends(verify_api_key)])
 def get_notifications(db: Session = Depends(get_db)):

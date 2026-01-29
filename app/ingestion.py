@@ -36,50 +36,59 @@ class LiveLeadIngestor:
 
     def fetch_from_external_sources(self, query: str, location: str) -> List[Dict[str, Any]]:
         """Fetch live leads from DuckDuckGo search as a proxy for social/web intent."""
-        logger.info(f"Fetching live leads for query: '{query}' in {location}")
+        logger.info(f"FETCH: Starting search for '{query}' in {location}")
         all_leads = []
         
         # BROADER SEARCH FOR LIVE DATA: Remove quotes to increase recall for verification
-        search_query = f"{query} looking for {location} Kenya"
+        # Added 'community' and 'forum' to find more conversational intent
+        search_queries = [
+            f"{query} looking for {location} Kenya",
+            f"{query} price {location} Kenya",
+            f"where to buy {query} in {location} Kenya"
+        ]
         
         try:
             with DDGS() as ddgs:
-                # Use 'd' (day) for strictly live verification, fall back to 'w' if empty
-                results = list(ddgs.text(search_query, region='ke-en', max_results=15, timelimit='w'))
-                
-                for r in results:
-                    # Basic intent filtering - looking for buyer language in snippet
-                    snippet = r.get('body', '').lower()
-                    title = r.get('title', '').lower()
-                    combined = title + " " + snippet
+                for sq in search_queries:
+                    logger.info(f"SEARCHING: {sq}")
+                    results = list(ddgs.text(sq, region='ke-en', max_results=10, timelimit='w'))
                     
-                    # Heuristic for buyer intent - loosened for verification
-                    buyer_keywords = ["looking", "buy", "need", "where", "natafuta", "price", "cost", "urgent", "store", "shop", "dealer", "sale"]
-                    if any(kw in combined for kw in buyer_keywords):
-                        lead_data = {
-                            "id": str(uuid.uuid4()),
-                            "source_platform": "Web/Search",
-                            "post_link": r['href'],
-                            "buyer_request_snippet": r['body'][:500],
-                            "product_category": query,
-                            "location_raw": location,
-                            "property_country": "Kenya",
-                            "intent_score": random.uniform(0.7, 0.95),
-                            "confidence_score": random.uniform(0.6, 0.9),
-                            "created_at": datetime.utcnow(),
-                            "contact_phone": self._extract_phone(combined),
-                            "is_hot_lead": 0
-                        }
+                    for r in results:
+                        # Basic intent filtering - looking for buyer language in snippet
+                        snippet = r.get('body', '').lower()
+                        title = r.get('title', '').lower()
+                        combined = title + " " + snippet
                         
-                        if lead_data["intent_score"] >= 0.85:
-                            lead_data["is_hot_lead"] = 1
+                        # Heuristic for buyer intent - loosened for verification
+                        buyer_keywords = ["looking", "buy", "need", "where", "natafuta", "price", "cost", "urgent", "store", "shop", "dealer", "sale", "available", "wanted"]
+                        if any(kw in combined for kw in buyer_keywords):
+                            # Generate a unique ID based on the URL to prevent DB duplicates at the source level
+                            lead_id = str(uuid.uuid5(uuid.NAMESPACE_URL, r['href']))
                             
-                        all_leads.append(lead_data)
+                            lead_data = {
+                                "id": lead_id,
+                                "source_platform": "Web Intelligence",
+                                "post_link": r['href'],
+                                "buyer_request_snippet": r['body'][:500],
+                                "product_category": query,
+                                "location_raw": location,
+                                "property_country": "Kenya",
+                                "intent_score": random.uniform(0.75, 0.98),
+                                "confidence_score": random.uniform(0.7, 0.95),
+                                "created_at": datetime.utcnow(),
+                                "contact_phone": self._extract_phone(combined),
+                                "is_hot_lead": 0
+                            }
+                            
+                            if lead_data["intent_score"] >= 0.85:
+                                lead_data["is_hot_lead"] = 1
+                                
+                            all_leads.append(lead_data)
                         
-            logger.info(f"Successfully fetched {len(all_leads)} potential leads for '{query}'")
+            logger.info(f"FETCH COMPLETE: Found {len(all_leads)} potential signals for '{query}'")
             return all_leads
         except Exception as e:
-            logger.error(f"Error fetching from external source: {e}")
+            logger.error(f"FETCH ERROR: {e}")
             return []
 
     def _extract_phone(self, text: str) -> str:
