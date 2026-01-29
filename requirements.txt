@@ -28,3 +28,5 @@ sentence-transformers
 geopy
 uuid
 python-multipart
+apscheduler
+duckduckgo_search
