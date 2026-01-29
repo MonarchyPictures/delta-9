@@ -20,8 +20,8 @@ const Dashboard = () => {
       if (!isPolling) {
         setLeads([]);
         setHasSearched(true);
-        // Direct DB Ingestion Trigger
-        await fetch(`${apiUrl}/search`, {
+        // Direct DB Ingestion Trigger - Now returns real leads
+        const searchRes = await fetch(`${apiUrl}/search`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -29,9 +29,18 @@ const Dashboard = () => {
           },
           body: new URLSearchParams({ query: searchQuery, location: 'Nairobi' })
         });
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        if (searchRes.ok) {
+          const searchData = await searchRes.json();
+          if (searchData.results && searchData.results.length > 0) {
+            setLeads(searchData.results);
+            setLoading(false); // Stop loading immediately since we have results
+            return; // Exit early as we have the live data
+          }
+        }
       }
 
+      // Fallback or Polling: Fetch from standard leads endpoint
       const res = await fetch(`${apiUrl}/leads?query=${encodeURIComponent(searchQuery)}&limit=10`, {
         headers: {
           'X-API-Key': apiKey

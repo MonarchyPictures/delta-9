@@ -158,26 +158,39 @@ async def trigger_search(
     location: str = Form("Nairobi"),
     db: Session = Depends(get_db)
 ):
-    """6. INGESTION PIPELINE SANITY - Direct DB Writes for Kenya-only leads."""
-    # Ensure all ingestion is filtered to Kenya context
-    target_location = "Nairobi, Kenya" if "nairobi" in location.lower() else f"{location}, Kenya"
-    
-    # 6. INGESTION PIPELINE - Direct DB Writes for Kenya-only leads.
-    new_lead = models.Lead(
-        id=str(uuid.uuid4()),
-        product_category=query,
-        location_raw=target_location,
-        property_country="Kenya",
-        buyer_request_snippet=f"I am looking for {query} in {target_location}",
-        intent_score=0.95,
-        source_platform="Live Market Feed",
-        buyer_name=f"Buyer_{str(uuid.uuid4())[:8]}",
-        status=models.CRMStatus.NEW
-    )
-    db.add(new_lead)
-    db.commit()
-    db.refresh(new_lead)
-    return {"status": "Lead successfully ingested", "lead_id": new_lead.id}
+    """
+    7. LIVE DISCOVERY - Triggers real-time web ingestion for the dashboard.
+    This replaces the 'dummy' ingestion with real DuckDuckGo-powered discovery.
+    """
+    try:
+        print(f"--- Dashboard Search Triggered: {query} in {location} ---")
+        ingestor = LiveLeadIngestor(db)
+        
+        # 1. Fetch real live leads from the web
+        raw_leads = ingestor.fetch_from_external_sources(query, location)
+        
+        if not raw_leads:
+            print(f"--- No live signals found for '{query}' ---")
+            return {"results": [], "status": "No signals found"}
+            
+        # 2. Save them to DB (handles duplicates automatically)
+        ingestor.save_leads_to_db(raw_leads)
+        
+        # 3. Fetch them back from DB to ensure we return full model objects
+        # We filter by the query to return relevant results to the dashboard
+        leads = db.query(models.Lead).filter(
+            or_(
+                models.Lead.product_category.ilike(f"%{query}%"),
+                models.Lead.buyer_request_snippet.ilike(f"%{query}%")
+            )
+        ).order_by(models.Lead.created_at.desc()).limit(10).all()
+        
+        print(f"--- Dashboard Search returning {len(leads)} live signals ---")
+        return {"results": leads, "status": "Live signals captured"}
+        
+    except Exception as e:
+        print(f"--- Dashboard Search ERROR: {str(e)} ---")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/leads/{lead_id}", dependencies=[Depends(verify_api_key)])
 def get_lead_detail(lead_id: str, db: Session = Depends(get_db)):
