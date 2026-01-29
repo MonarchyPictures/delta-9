@@ -1,7 +1,7 @@
 import os
 import uuid
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -148,7 +148,7 @@ def get_leads(
             db_query = db_query.filter(models.Lead.radius_km <= radius)
 
         if time_range:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             if time_range == "1h":
                 db_query = db_query.filter(models.Lead.created_at >= now - timedelta(hours=1))
             elif time_range == "24h":
