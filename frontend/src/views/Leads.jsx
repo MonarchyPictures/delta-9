@@ -34,7 +34,8 @@ const Leads = () => {
       const res = await fetch(`${apiUrl}/leads?${params.toString()}`, {
         headers: {
           'X-API-Key': apiKey
-        }
+        },
+        cache: 'no-store' // ENFORCED: No cached data
       });
       if (res.ok) {
         const data = await res.json();

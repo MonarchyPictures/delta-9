@@ -98,6 +98,12 @@ class Lead(Base):
     is_hot_lead = Column(Integer, default=0) # 1 if score >= 85
     whatsapp_ready_data = Column(JSON) # Stores formatted output
     
+    # MANDATORY PROOF OF LIFE (PROD STRICT)
+    source_url = Column(String)
+    request_timestamp = Column(DateTime)
+    http_status = Column(Integer)
+    latency_ms = Column(Integer)
+    
     # Verification & Badges
     verification_badges = Column(JSON) # ["verified_contact", "active_buyer", "high_intent"]
     account_age_days = Column(Integer)

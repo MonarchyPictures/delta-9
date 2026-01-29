@@ -11,32 +11,45 @@ const Dashboard = () => {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const fetchLeads = async (searchQuery, isPolling = false) => {
     if (!isPolling) setLoading(true);
+    setErrorMessage(''); // Clear previous error
     try {
       const apiUrl = getApiUrl();
       const apiKey = getApiKey();
+      
       if (!isPolling) {
         setLeads([]);
         setHasSearched(true);
-        // Direct DB Ingestion Trigger - Now returns real leads
+        
+        // ABSOLUTE RULE: Real-time discovery with no-store cache
         const searchRes = await fetch(`${apiUrl}/search`, {
           method: 'POST',
           headers: { 
-            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Type': 'application/json',
             'X-API-Key': apiKey
           },
-          body: new URLSearchParams({ query: searchQuery, location: 'Nairobi' })
+          body: JSON.stringify({ 
+            query: searchQuery, 
+            location: 'Kenya' 
+          }),
+          cache: 'no-store' // ENFORCED: No cached data
         });
         
-        if (searchRes.ok) {
-          const searchData = await searchRes.json();
-          if (searchData.results && searchData.results.length > 0) {
-            setLeads(searchData.results);
-            setLoading(false); // Stop loading immediately since we have results
-            return; // Exit early as we have the live data
-          }
+        if (!searchRes.ok) {
+          const errorData = await searchRes.json();
+          throw new Error(errorData.detail || 'ERROR: No live sources returned data.');
+        }
+
+        const searchData = await searchRes.json();
+        if (searchData.results && searchData.results.length > 0) {
+          setLeads(searchData.results);
+          setLoading(false);
+          return;
+        } else {
+          throw new Error('ERROR: No live sources returned data.');
         }
       }
 
@@ -44,14 +57,15 @@ const Dashboard = () => {
       const res = await fetch(`${apiUrl}/leads?query=${encodeURIComponent(searchQuery)}&limit=10`, {
         headers: {
           'X-API-Key': apiKey
-        }
+        },
+        cache: 'no-store' // ENFORCED: No cached data
       });
-      if (res.ok) {
-        const data = await res.json();
-        setLeads(data);
-      }
+
+      const data = await res.json();
+      setLeads(data);
     } catch (err) {
       console.error("Discovery error:", err);
+      setErrorMessage(err.message);
     } finally {
       if (!isPolling) setLoading(false);
     }
@@ -90,7 +104,13 @@ const Dashboard = () => {
         {hasSearched && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex-1 overflow-y-auto px-4 pb-12">
             <div className="max-w-4xl mx-auto space-y-4">
-              {leads.length > 0 ? leads.map((lead) => (
+              {errorMessage ? (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-8 text-center">
+                  <p className="text-red-500 font-black uppercase tracking-widest text-sm mb-2">PROD_STRICT PIPELINE FAILED</p>
+                  <p className="text-white font-bold text-lg">{errorMessage}</p>
+                  <p className="text-white/40 text-xs mt-4 uppercase tracking-tighter">Only independently verified outbound signals are permitted in production.</p>
+                </div>
+              ) : leads.length > 0 ? leads.map((lead) => (
                 <LeadCard key={lead.id} lead={lead} onClick={() => navigate('/leads')} />
               )) : !loading && <p className="text-center text-white/20 font-bold py-20">NO ACTIVE SIGNALS IN NAIROBI NODES</p>}
             </div>

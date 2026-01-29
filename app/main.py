@@ -153,44 +153,42 @@ def get_leads(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/search", dependencies=[Depends(verify_api_key)])
-async def trigger_search(
-    query: str = Form(...), 
-    location: str = Form("Nairobi"),
-    db: Session = Depends(get_db)
-):
-    """
-    7. LIVE DISCOVERY - Triggers real-time web ingestion for the dashboard.
-    This replaces the 'dummy' ingestion with real DuckDuckGo-powered discovery.
-    """
+async def search_leads(request: Request, db: Session = Depends(get_db)):
+    """Dashboard search: Real-time discovery with mandatory proof of life."""
     try:
-        print(f"--- Dashboard Search Triggered: {query} in {location} ---")
+        data = await request.json()
+        query = data.get("query")
+        location = data.get("location", "Kenya")
+        
+        if not query:
+            raise HTTPException(status_code=400, detail="Query is required")
+
+        print(f"--- Dashboard Search: Starting real-time discovery for '{query}' ---")
+        
+        # ABSOLUTE RULE: Real-time outbound call only
         ingestor = LiveLeadIngestor(db)
-        
-        # 1. Fetch real live leads from the web
-        raw_leads = ingestor.fetch_from_external_sources(query, location)
-        
-        if not raw_leads:
-            print(f"--- No live signals found for '{query}' ---")
-            return {"results": [], "status": "No signals found"}
+        try:
+            live_leads = ingestor.fetch_from_external_sources(query, location)
             
-        # 2. Save them to DB (handles duplicates automatically)
-        ingestor.save_leads_to_db(raw_leads)
-        
-        # 3. Fetch them back from DB to ensure we return full model objects
-        # We filter by the query to return relevant results to the dashboard
-        leads = db.query(models.Lead).filter(
-            or_(
-                models.Lead.product_category.ilike(f"%{query}%"),
-                models.Lead.buyer_request_snippet.ilike(f"%{query}%")
-            )
-        ).order_by(models.Lead.created_at.desc()).limit(10).all()
-        
-        print(f"--- Dashboard Search returning {len(leads)} live signals ---")
-        return {"results": leads, "status": "Live signals captured"}
-        
+            # Save verified leads to DB for persistence
+            if live_leads:
+                ingestor.save_leads_to_db(live_leads)
+            
+            return {
+                "results": live_leads, 
+                "status": "Live signals captured",
+                "environment": os.getenv("ENVIRONMENT", "development")
+            }
+        except RuntimeError as re:
+            # ABSOLUTE RULE: Return hard error if no data or not production
+            print(f"--- PROD_STRICT ERROR: {str(re)} ---")
+            raise HTTPException(status_code=503, detail=str(re))
+            
+    except HTTPException as he:
+        raise he
     except Exception as e:
-        print(f"--- Dashboard Search ERROR: {str(e)} ---")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"--- Dashboard Search CRITICAL ERROR: {str(e)} ---")
+        raise HTTPException(status_code=500, detail=f"ERROR: No live sources returned data. {str(e)}")
 
 @app.get("/leads/{lead_id}", dependencies=[Depends(verify_api_key)])
 def get_lead_detail(lead_id: str, db: Session = Depends(get_db)):

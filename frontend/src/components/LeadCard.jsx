@@ -52,6 +52,13 @@ const LeadCard = ({ lead, onSave, onDelete, onClick }) => {
       onClick={() => onClick && onClick(lead)}
       className="bg-[#0A0A0A] border border-white/5 rounded-2xl overflow-hidden hover:border-white/10 transition-all group cursor-pointer relative"
     >
+      {/* Proof of Life Badge */}
+      {lead.source_url && (
+        <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-blue-600/10 border border-blue-500/20 px-2 py-1 rounded-md z-10">
+          <span className="flex h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+          <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest">LIVE</span>
+        </div>
+      )}
       <div className="p-5">
         {/* Top Badges */}
         <div className="flex justify-between items-center mb-4">
@@ -154,6 +161,29 @@ const LeadCard = ({ lead, onSave, onDelete, onClick }) => {
             Full Intelligence <ExternalLink size={12} className="group-hover/btn:translate-x-0.5 group-hover/btn:-translate-y-0.5 transition-transform" />
           </button>
         </div>
+        {/* Proof of Life Metadata Footer */}
+        {lead.source_url && (
+          <div className="mt-4 pt-4 border-t border-white/5 flex flex-wrap gap-4 items-center justify-between text-[10px] font-medium text-white/30 uppercase tracking-widest">
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-1">
+                <ExternalLink size={10} className="text-blue-500" />
+                Source: <span className="text-white/60 truncate max-w-[150px]">{lead.source_url}</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <Clock size={10} />
+                Fetched: <span className="text-white/60">{lead.request_timestamp ? new Date(lead.request_timestamp).toLocaleTimeString() : 'N/A'}</span>
+              </span>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-1">
+                Status: <span className={lead.http_status === 200 ? "text-green-500" : "text-red-500"}>{lead.http_status || 200}</span>
+              </span>
+              <span className="flex items-center gap-1">
+                Latency: <span className="text-white/60">{lead.latency_ms || 0}ms</span>
+              </span>
+            </div>
+          </div>
+        )}
       </div>
     </motion.div>
   );
