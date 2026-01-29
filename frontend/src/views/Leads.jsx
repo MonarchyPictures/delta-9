@@ -156,23 +156,7 @@ const Leads = () => {
               leads.map((lead) => (
                 <LeadCard key={lead.id} lead={lead} />
               ))
-            ) : (
-              <div className="col-span-full py-32 text-center">
-                <p className="text-white/20 font-black text-xl italic uppercase tracking-tighter">No signals matching your filters in Kenya nodes</p>
-                <button 
-                  onClick={() => {
-                    setQuery('');
-                    setRadius('');
-                    setTimeRange('');
-                    setHighIntent(false);
-                    setHasWhatsapp(false);
-                  }}
-                  className="mt-4 text-blue-600 text-xs font-bold uppercase tracking-widest hover:underline"
-                >
-                  Clear all filters
-                </button>
-              </div>
-            )}
+            ) : null}
           </div>
         )}
       </div>

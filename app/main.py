@@ -1,6 +1,8 @@
 import os
 import uuid
-from typing import Optional, List
+import time
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -9,6 +11,13 @@ from .db import models, database
 from .db.database import get_db, engine
 from .ingestion import LiveLeadIngestor
 from apscheduler.schedulers.background import BackgroundScheduler
+
+# ABSOLUTE RULE: PROD STRICT STARTUP CHECK
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+if ENVIRONMENT == "production":
+    print("--- PROD_STRICT: Delta9 starting in PRODUCTION mode ---")
+else:
+    print("--- WARNING: Delta9 starting in DEVELOPMENT mode. Live leads will be restricted. ---")
 
 # Create tables on startup
 try:
@@ -40,13 +49,16 @@ def fetch_live_leads_job():
             print(f"--- Background Job: Running cycles for {len(active_agents)} active agents ---")
             for agent in active_agents:
                 print(f"--- Background Job: Fetching for Agent '{agent.name}' (Query: {agent.query}) ---")
-                leads = ingestor.fetch_from_external_sources(agent.query, agent.location)
-                if leads:
-                    ingestor.save_leads_to_db(leads)
-                
-                # Update last_run
-                agent.last_run = datetime.utcnow()
-                db.commit()
+                try:
+                    leads = ingestor.fetch_from_external_sources(agent.query, agent.location)
+                    if leads:
+                        ingestor.save_leads_to_db(leads)
+                    
+                    # Update last_run
+                    agent.last_run = datetime.now(timezone.utc)
+                    db.commit()
+                except Exception as e:
+                    print(f"--- Agent '{agent.name}' Ingestion Failed: {str(e)} ---")
                 
         print("--- Background Job: Finished Ingestion Cycle ---")
     except Exception as e:
@@ -113,8 +125,12 @@ def get_leads(
     try:
         from datetime import datetime, timedelta
         
-        # 5. GEO-LOCK TO KENYA - Server side enforcement using property_country
-        db_query = db.query(models.Lead).filter(models.Lead.property_country == "Kenya")
+        # ABSOLUTE RULE: Filter for PROOF OF LIFE (REAL DATA ONLY)
+        db_query = db.query(models.Lead).filter(
+            models.Lead.property_country == "Kenya",
+            models.Lead.source_url.isnot(None),
+            models.Lead.http_status == 200
+        )
 
         # Filter for quality leads (Base threshold)
         if high_intent:
@@ -192,9 +208,13 @@ async def search_leads(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/leads/{lead_id}", dependencies=[Depends(verify_api_key)])
 def get_lead_detail(lead_id: str, db: Session = Depends(get_db)):
-    lead = db.query(models.Lead).filter(models.Lead.id == lead_id).first()
+    lead = db.query(models.Lead).filter(
+        models.Lead.id == lead_id,
+        models.Lead.source_url.isnot(None),
+        models.Lead.http_status == 200
+    ).first()
     if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
+        raise HTTPException(status_code=404, detail="Lead not found or lacks proof-of-life proof")
     return lead
 
 @app.get("/leads/search", dependencies=[Depends(verify_api_key)])
@@ -206,6 +226,8 @@ def search_leads_endpoint(
 ):
     """Public discovery search interface."""
     results = get_leads(location=location, query=query, limit=limit, db=db)
+    if not results:
+        raise HTTPException(status_code=503, detail="ERROR: No live sources returned data. PROD_STRICT pipeline failure.")
     return {"results": results, "search_status": "PROD_STRICT"}
 
 @app.post("/outreach/contact/{lead_id}", dependencies=[Depends(verify_api_key)])
@@ -248,7 +270,7 @@ async def create_agent(request: Request, db: Session = Depends(get_db)):
             leads = ingestor.fetch_from_external_sources(new_agent.query, new_agent.location)
             if leads:
                 ingestor.save_leads_to_db(leads)
-            new_agent.last_run = datetime.utcnow()
+            new_agent.last_run = datetime.now(timezone.utc)
             db.commit()
         except Exception as ingest_err:
             print(f"--- Initial ingestion failed for agent {new_agent.name}: {str(ingest_err)} ---")

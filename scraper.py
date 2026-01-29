@@ -38,9 +38,8 @@ class LeadScraper:
         search_queries = [f"{query} {location}"]
         # Only expand if it's not already a specific site search
         if "site:" not in query:
-             # Add more intent-heavy variations to get more leads
-             templates = random.sample(self.intent_templates, 3)
-             for t in templates:
+             # Use all intent templates to maximize signal retrieval
+             for t in self.intent_templates:
                  search_queries.append(t.format(query=query, location=location))
         else:
             # If it is a site search, try to vary it slightly if it fails

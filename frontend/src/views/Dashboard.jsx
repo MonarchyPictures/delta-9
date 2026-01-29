@@ -112,7 +112,7 @@ const Dashboard = () => {
                 </div>
               ) : leads.length > 0 ? leads.map((lead) => (
                 <LeadCard key={lead.id} lead={lead} onClick={() => navigate('/leads')} />
-              )) : !loading && <p className="text-center text-white/20 font-bold py-20">NO ACTIVE SIGNALS IN NAIROBI NODES</p>}
+              )) : null}
             </div>
           </motion.div>
         )}

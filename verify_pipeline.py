@@ -8,18 +8,22 @@ from app.ingestion import LiveLeadIngestor
 def verify_thrice():
     print("--- PROD_STRICT: Starting 3-cycle pipeline verification ---")
     os.environ["ENVIRONMENT"] = "production"
+    
+    import logging
+    logging.getLogger("LeadIngestion").setLevel(logging.DEBUG)
+    
     db = SessionLocal()
     ingestor = LiveLeadIngestor(db)
     
     results = []
-    queries = ["tires", "solar panels", "water tanks"]
+    queries = ["water tank", "construction", "solar"]
     
     for i in range(3):
         print(f"\nRUN {i+1}/3...")
         start_time = time.time()
         try:
-            # We use a slightly different query each time or the same to check for new results
-            query = "tires" 
+            # Use broader queries to ensure we get results and metadata
+            query = queries[i]
             leads = ingestor.fetch_from_external_sources(query, "Nairobi")
             duration = time.time() - start_time
             

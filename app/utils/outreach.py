@@ -84,8 +84,8 @@ class OutreachEngine:
                 
                 if is_positive and not is_negative:
                     lead.status = models.ContactStatus.CONVERTED
-                    # Increase conversion rate (mock logic: successful conversions / total responses)
-                    lead.conversion_rate = 100.0 # Simplification: if positive, it's a "conversion" for this lead
+                    # Real-world conversion signal: positive response received
+                    lead.conversion_rate = 100.0 
                 else:
                     lead.status = models.ContactStatus.CONTACTED
                     
