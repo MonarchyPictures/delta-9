@@ -1,0 +1,45 @@
+services:
+  # 1. Backend Web Service (FastAPI)
+  - type: web
+    name: delta9-backend
+    env: python
+    region: ohio
+    plan: free
+    buildCommand: pip install -r requirements.txt && playwright install chromium
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: API_KEY
+        value: d9_prod_secret_key_2024
+      - key: DATABASE_URL
+        fromDatabase:
+          name: delta9-db
+          property: connectionString
+      - key: SERPAPI_API_KEY
+        sync: false # User will need to add this manually in Render Dashboard
+
+  # 2. Frontend Static Site (React/Vite)
+  - type: static
+    name: delta9-frontend
+    env: static
+    region: ohio
+    plan: free
+    buildCommand: npm install && npm run build
+    publishPath: dist
+    rootDir: frontend
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: delta9-backend
+          property: host
+      - key: VITE_API_KEY
+        value: d9_prod_secret_key_2024
+      - key: NODE_VERSION
+        value: 18
+
+databases:
+  - name: delta9-db
+    plan: free
+    region: ohio
