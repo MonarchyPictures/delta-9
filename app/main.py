@@ -144,16 +144,23 @@ def verify_api_key(x_api_key: str = Header(None)):
 
 @app.get("/")
 def read_root():
-    # If frontend/dist exists, serve index.html, otherwise return API status
-    index_path = os.path.join("frontend", "dist", "index.html")
+    # Use absolute path to ensure we find the frontend dist
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    index_path = os.path.join(base_dir, "frontend", "dist", "index.html")
+    
+    logger.info(f"--- Root request: Checking for UI at {index_path} ---")
+    
     if os.path.exists(index_path):
         return FileResponse(index_path)
+        
+    logger.warning(f"--- UI NOT FOUND at {index_path}. Falling back to API status. ---")
     return {
         "status": "online",
         "message": "Delta9 Production API - Kenya Market Intelligence Node",
         "version": "1.0.0",
         "region": "Kenya",
-        "ui_status": "not_built"
+        "ui_status": "not_built",
+        "search_path": index_path
     }
 
 # 2. UPDATE BACKEND TO ENFORCE KENYA FILTER
@@ -485,7 +492,9 @@ async def update_settings(request: Request, db: Session = Depends(get_db)):
 
 # 9. SERVE FRONTEND (SPA Support)
 # Mount static files from the frontend build directory
-dist_path = os.path.join("frontend", "dist")
+base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+dist_path = os.path.join(base_dir, "frontend", "dist")
+
 if os.path.exists(dist_path):
     # Check for assets directory before mounting
     assets_path = os.path.join(dist_path, "assets")
@@ -494,8 +503,8 @@ if os.path.exists(dist_path):
     
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        # Skip if path is an API endpoint (should have been caught above)
-        if full_path.startswith("api/") or full_path.startswith("notifications") or full_path.startswith("leads"):
+        # Skip if path is an API endpoint
+        if full_path.startswith("api/") or full_path.startswith("notifications") or full_path.startswith("leads") or full_path.startswith("agents"):
             raise HTTPException(status_code=404)
             
         file_path = os.path.join(dist_path, full_path)
@@ -507,3 +516,5 @@ if os.path.exists(dist_path):
             return FileResponse(index_file)
         
         raise HTTPException(status_code=404)
+else:
+    logger.warning(f"--- SPA dist directory not found at {dist_path} ---")

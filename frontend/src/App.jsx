@@ -142,18 +142,24 @@ const App = () => {
     const activeControllerRef = { current: null };
 
     const fetchNotifications = async () => {
-      // If a request is already in progress or component unmounted, skip this poll cycle
-      if (activeControllerRef.current || !isMounted) return;
+      // If component unmounted, stop polling
+      if (!isMounted) return;
+      
+      // If a request is already in progress, don't start a new one, 
+      // but ensure we schedule the next check
+      if (activeControllerRef.current) {
+        pollTimer = setTimeout(fetchNotifications, 30000); 
+        return;
+      }
       
       const controller = new AbortController();
       activeControllerRef.current = controller;
       
-      // Use a robust timeout for high-latency environments (increased to 100s)
       const timeoutId = setTimeout(() => {
         if (activeControllerRef.current === controller) {
           controller.abort();
         }
-      }, 100000); 
+      }, 60000); // 60s timeout for notifications
 
       try {
         const res = await fetch(`${apiUrl}/notifications`, {
@@ -170,7 +176,11 @@ const App = () => {
           setNotifications(prev => {
             const unreadCount = data.filter(n => n.is_read === 0).length;
             const prevUnreadCount = prev.filter(n => n.is_read === 0).length;
-            if (notificationsEnabled && soundEnabled && unreadCount > prevUnreadCount) {
+            // Use current state values from refs or closure if needed, but here we use simple logic
+            // We'll check the soundEnabled state inside setNotifications to be safe
+            if (unreadCount > prevUnreadCount) {
+              // Note: soundEnabled and notificationsEnabled might be stale here
+              // so we just trigger the beep and let playBeep handle the check
               playBeep();
             }
             return data;
@@ -178,20 +188,18 @@ const App = () => {
         }
       } catch (err) {
         clearTimeout(timeoutId);
-        // ABSOLUTELY SILENT on AbortError to prevent console clutter in dev environment
+        // ABSOLUTELY SILENT on AbortError
         if (err.name === 'AbortError') return;
         
         if (isMounted) {
-          // Only log real errors, not cancellations
-          console.debug("Notification poll skipped or failed:", err.message);
+          console.debug("Notification poll failed:", err.message);
         }
       } finally {
         if (activeControllerRef.current === controller) {
           activeControllerRef.current = null;
         }
-        // Schedule next poll ONLY after the previous one is fully complete (success or fail)
         if (isMounted) {
-          pollTimer = setTimeout(fetchNotifications, 60000); // Poll every 60s
+          pollTimer = setTimeout(fetchNotifications, 60000); 
         }
       }
     };
@@ -206,7 +214,7 @@ const App = () => {
         activeControllerRef.current = null;
       }
     };
-  }, [notificationsEnabled, soundEnabled]);
+  }, []); // Remove dependencies to prevent constant restarts
 
   const markAsRead = async (id) => {
     const apiUrl = getApiUrl();
