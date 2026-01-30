@@ -74,8 +74,8 @@ def fetch_live_leads_job():
     finally:
         db.close()
 
-# Run ingestion every 15 minutes in production
-scheduler.add_job(fetch_live_leads_job, 'interval', minutes=15)
+# Run ingestion every 5 minutes in production to ensure "LIVE" leads
+scheduler.add_job(fetch_live_leads_job, 'interval', minutes=5)
 scheduler.start()
 
 print("--- Delta9 API Starting Up with Background Scheduler ---")

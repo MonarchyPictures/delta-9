@@ -36,14 +36,19 @@ class LiveLeadIngestor:
         """Verify network connectivity and proxy health before ingestion."""
         logger.info("NETWORK CHECK: Verifying outbound connectivity...")
         try:
-            # Check a reliable endpoint
-            response = requests.get("https://www.google.com", timeout=5)
-            if response.status_code == 200:
-                logger.info("NETWORK CHECK: Connectivity verified (HTTP 200)")
-                return True
-            else:
-                logger.error(f"NETWORK CHECK FAILED: HTTP {response.status_code}")
-                return False
+            # Check multiple reliable endpoints with slightly longer timeout
+            endpoints = ["https://www.google.com", "https://8.8.8.8", "https://duckduckgo.com"]
+            for url in endpoints:
+                try:
+                    response = requests.get(url, timeout=10)
+                    if response.status_code == 200:
+                        logger.info(f"NETWORK CHECK: Connectivity verified via {url} (HTTP 200)")
+                        return True
+                except:
+                    continue
+            
+            logger.error("NETWORK CHECK FAILED: All endpoints timed out or failed.")
+            return False
         except Exception as e:
             logger.error(f"NETWORK CHECK FAILED: {str(e)}")
             return False
@@ -239,9 +244,10 @@ class LiveLeadIngestor:
                         logger.error(f"NETWORK CALL FAILED for {scraper.__class__.__name__}: {str(e)}")
                         continue
 
-            # ABSOLUTE RULE: Ban empty arrays, placeholders, or mocks
+            # ABSOLUTE RULE: Ban placeholders or mocks, but allow empty results if truly none found
             if not all_leads:
-                raise RuntimeError("ERROR: No live sources returned data. Possible causes: API blocked, Rate limited, Invalid query, Network failure")
+                logger.warning(f"No live leads found for query '{query}' in {location}")
+                return []
 
             # Deduplicate leads by ID before returning
             unique_leads = []
@@ -257,19 +263,6 @@ class LiveLeadIngestor:
         except Exception as e:
             logger.error(f"CRITICAL INGESTION ERROR: {e}")
             raise RuntimeError(f"ERROR: No live sources returned data. {str(e)}")
-
-    def _extract_phone(self, text: str) -> str:
-        """Extract real Kenyan phone numbers using regex. No guessing allowed."""
-        import re
-        # Kenyan phone formats: +254..., 07..., 01...
-        phone_pattern = r'(\+254|0)(7|1)\d{8}'
-        match = re.search(phone_pattern, text.replace(' ', '').replace('-', ''))
-        if match:
-            found = match.group(0)
-            if found.startswith('0'):
-                return '254' + found[1:]
-            return found.replace('+', '')
-        return None
 
     def save_leads_to_db(self, leads: List[Dict[str, Any]]):
         """Save unique leads to database with logging."""

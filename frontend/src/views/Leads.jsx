@@ -8,11 +8,11 @@ const Leads = () => {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [location, setLocation] = useState('Nairobi');
+  const [location, setLocation] = useState('All');
   const [radius, setRadius] = useState('');
   const [timeRange, setTimeRange] = useState('');
-  const [highIntent, setHighIntent] = useState(true); // Default to TRUE
-  const [hasWhatsapp, setHasWhatsapp] = useState(true); // Default to TRUE
+  const [highIntent, setHighIntent] = useState(false); // Default to FALSE to show more signals
+  const [hasWhatsapp, setHasWhatsapp] = useState(false); // Default to FALSE to show more signals
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [error, setError] = useState(null);
   
@@ -148,9 +148,25 @@ const Leads = () => {
           </div>
 
           {/* Precision Filters Bar */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             <div className="relative">
               <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+              <select 
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-white text-xs font-black uppercase tracking-widest focus:outline-none appearance-none cursor-pointer hover:bg-white/10 transition-colors"
+              >
+                <option value="All" className="bg-neutral-900">All Kenya</option>
+                <option value="Nairobi" className="bg-neutral-900">Nairobi</option>
+                <option value="Mombasa" className="bg-neutral-900">Mombasa</option>
+                <option value="Kisumu" className="bg-neutral-900">Kisumu</option>
+                <option value="Nakuru" className="bg-neutral-900">Nakuru</option>
+                <option value="Eldoret" className="bg-neutral-900">Eldoret</option>
+              </select>
+            </div>
+
+            <div className="relative">
+              <Database className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
               <select 
                 value={radius}
                 onChange={(e) => setRadius(e.target.value)}
