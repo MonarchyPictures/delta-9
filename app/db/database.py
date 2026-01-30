@@ -3,10 +3,14 @@ from sqlalchemy.orm import sessionmaker
 import os
 
 # Use SQLite for now, easily switch to PostgreSQL
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./intent_radar.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+
+# If DATABASE_URL is empty after strip, fallback to local SQLite
+if not DATABASE_URL:
+    DATABASE_URL = "sqlite:///./intent_radar.db"
 
 # Render/Heroku fix: SQLAlchemy requires 'postgresql://' instead of 'postgres://'
-if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 engine = create_engine(

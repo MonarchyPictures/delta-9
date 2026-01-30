@@ -115,7 +115,7 @@ logger.info(f"--- Database URL present: {bool(os.getenv('DATABASE_URL'))} ---")
 # 8. SECURITY & PRODUCTION HARDENING
 # Secure routes and use environment variables for keys/DB
 API_KEY = os.getenv("API_KEY", "d9_prod_secret_key_2024") 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip() or "sqlite:///./intent_radar.db"
 
 # Production CORS enforcement
 origins = [
