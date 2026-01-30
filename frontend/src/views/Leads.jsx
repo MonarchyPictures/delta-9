@@ -79,6 +79,12 @@ const Leads = () => {
         const data = await res.json();
         // Handle the Zero Results Rule response from backend
         if (data && data.message && data.leads) {
+          // AUTO-ADJUST: If no leads found in 2h window, automatically switch to 24h
+          if ((!timeRange || timeRange === '2h' || timeRange === '') && data.leads.length === 0) {
+             console.log("No leads in 2h window, auto-switching to 24h...");
+             setTimeRange('24h');
+             return; // The useEffect dependency will trigger a new fetch
+          }
           setLeads(data.leads);
         } else {
           setLeads(data);
@@ -260,19 +266,30 @@ const Leads = () => {
                   <Database className="w-12 h-12 text-white/20" />
                 </div>
                 <div className="space-y-2">
-                  <h3 className="text-xl font-black text-white uppercase tracking-tighter italic">No buyer intent detected in the last 2 hours</h3>
-                  <p className="text-white/40 text-sm max-w-md mx-auto">The engine has strictly filtered out all suppliers, agents, and stale signals. Only real-time demand is allowed.</p>
-                </div>
-                <div className="flex flex-col items-center gap-4">
-                  <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">System Suggestion</span>
-                  <button 
-                    onClick={() => setTimeRange('24h')}
-                    className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/20 active:scale-95"
-                  >
-                    Widen Time Window (24h)
-                  </button>
-                  <p className="text-[10px] text-white/20 uppercase tracking-widest">DO NOT BROADEN INTENT RULES</p>
-                </div>
+              <h3 className="text-xl font-black text-white uppercase tracking-tighter italic">
+                No buyer intent detected in the last {timeRange === '24h' ? '24' : (timeRange === '72h' ? '72' : (timeRange === '1h' ? '1' : '2'))} hours
+              </h3>
+              <p className="text-white/40 text-sm max-w-md mx-auto">The engine has strictly filtered out all suppliers, agents, and stale signals. Only real-time demand is allowed.</p>
+            </div>
+            <div className="flex flex-col items-center gap-4">
+              <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">System Suggestion</span>
+              {(!timeRange || timeRange === '2h' || timeRange === '' || timeRange === '1h') ? (
+                <button 
+                  onClick={() => setTimeRange('24h')}
+                  className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/20 active:scale-95"
+                >
+                  Widen Time Window (24h)
+                </button>
+              ) : (
+                <button 
+                  onClick={() => setTimeRange('72h')}
+                  className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/20 active:scale-95"
+                >
+                  Widen Time Window (72h)
+                </button>
+              )}
+              <p className="text-[10px] text-white/20 uppercase tracking-widest">DO NOT BROADEN INTENT RULES</p>
+            </div>
               </div>
             )}
           </div>

@@ -148,7 +148,7 @@ const App = () => {
       const controller = new AbortController();
       activeControllerRef.current = controller;
       
-      // Use a slightly longer timeout to allow network latency in Kenya
+      // Use a significantly longer timeout to allow network latency in Kenya
       const timeoutId = setTimeout(() => {
         if (activeControllerRef.current === controller) {
           try {
@@ -157,7 +157,7 @@ const App = () => {
             // Ignore abort errors
           }
         }
-      }, 25000); 
+      }, 45000); 
 
       try {
         const res = await fetch(`${apiUrl}/notifications`, {
@@ -185,8 +185,8 @@ const App = () => {
         clearTimeout(timeoutId);
         // SILENT CATCH: Never log AbortError or standard failures during polling to keep console clean
         if (err.name !== 'AbortError') {
-          // Only log non-abort errors if needed for debugging
-          // console.error("Poll error:", err);
+          // If we get a real network error, we might want to back off the polling frequency
+          console.warn("Notification poll failed (network issues), retrying in 30s...");
         }
       } finally {
         if (activeControllerRef.current === controller) {

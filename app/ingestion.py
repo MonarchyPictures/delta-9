@@ -36,15 +36,22 @@ class LiveLeadIngestor:
         """Verify network connectivity and proxy health before ingestion."""
         logger.info("NETWORK CHECK: Verifying outbound connectivity...")
         try:
-            # Check multiple reliable endpoints with slightly longer timeout
-            endpoints = ["https://www.google.com", "https://8.8.8.8", "https://duckduckgo.com"]
+            # Check multiple reliable endpoints with significantly longer timeout for high-latency environments
+            endpoints = [
+                "https://www.google.com", 
+                "https://8.8.8.8", 
+                "https://duckduckgo.com",
+                "https://www.facebook.com"
+            ]
             for url in endpoints:
                 try:
-                    response = requests.get(url, timeout=10)
-                    if response.status_code == 200:
-                        logger.info(f"NETWORK CHECK: Connectivity verified via {url} (HTTP 200)")
+                    # Increase timeout to 20s to handle Kenyan mobile network latency
+                    response = requests.get(url, timeout=20)
+                    if response.status_code == 200 or response.status_code == 301 or response.status_code == 302:
+                        logger.info(f"NETWORK CHECK: Connectivity verified via {url} (HTTP {response.status_code})")
                         return True
-                except:
+                except Exception as e:
+                    logger.warning(f"NETWORK CHECK: {url} unreachable: {str(e)}")
                     continue
             
             logger.error("NETWORK CHECK FAILED: All endpoints timed out or failed.")

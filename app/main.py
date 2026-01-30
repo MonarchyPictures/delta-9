@@ -398,6 +398,7 @@ def get_settings():
         "notifications_enabled": True,
         "sound_enabled": True,
         "region": "Kenya",
+        "geo_lock": "Kenya",
         "mode": "PROD_STRICT"
     }
 
@@ -414,11 +415,6 @@ def clear_notifications(db: Session = Depends(get_db)):
     db.query(models.Notification).delete()
     db.commit()
     return {"status": "ok"}
-
-@app.get("/settings", dependencies=[Depends(verify_api_key)])
-def get_settings(db: Session = Depends(get_db)):
-    # In a real app, these would be in the DB
-    return {"notifications_enabled": True, "sound_enabled": True, "geo_lock": "Kenya"}
 
 @app.post("/settings", dependencies=[Depends(verify_api_key)])
 async def update_settings(request: Request, db: Session = Depends(get_db)):
