@@ -199,7 +199,20 @@ def get_leads(
             case((models.Lead.contact_phone.isnot(None), 0), else_=1),
             models.Lead.created_at.desc()
         ).limit(limit).all()
-        return [lead.to_dict() for lead in leads]
+        
+        results = [lead.to_dict() for lead in leads]
+        
+        # Step 6 — Zero Results Rule
+        if not results and (not time_range or time_range == "2h"):
+            # Return a special response that the frontend can handle
+            # Note: We still return 200 but with a message and suggestion
+            return {
+                "leads": [],
+                "message": "No buyer intent detected in the last 2 hours",
+                "suggestion": "Suggest widening time window ONLY (not intent rules)"
+            }
+            
+        return results
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

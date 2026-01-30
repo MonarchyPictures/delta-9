@@ -81,6 +81,11 @@ const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange }) => {
                 HOT
               </span>
             )}
+            {lead.urgency_level === 'high' && (
+              <span className="px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest border border-orange-500/30 bg-orange-500/10 text-orange-500 flex items-center gap-1">
+                URGENT
+              </span>
+            )}
             {lead.phone && (
               <span className="px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest border border-green-500/30 bg-green-500/10 text-green-500 flex items-center gap-1">
                 <ShieldCheck size={10} />

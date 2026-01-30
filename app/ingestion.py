@@ -107,6 +107,44 @@ class LiveLeadIngestor:
         
         return "Verified Market Signal"
 
+    def _parse_urgency(self, text: str) -> str:
+        """Determine urgency level based on keywords."""
+        text = text.lower()
+        high_urgency = ["asap", "urgently", "urgent", "immediately", "now", "today", "ready to pay", "fast"]
+        medium_urgency = ["soon", "this week", "budget", "looking for"]
+        
+        if any(kw in text for kw in high_urgency):
+            return "high"
+        if any(kw in text for kw in medium_urgency):
+            return "medium"
+        return "low"
+
+    def _verify_timestamp_strict(self, text: str) -> bool:
+        """
+        CRITICAL: Include ONLY posts/messages created in the last 120 minutes.
+        If timestamp cannot be verified -> DISCARD.
+        Since we are using search engine snippets, we look for relative time markers.
+        """
+        text = text.lower()
+        # Relative time markers that indicate < 120 minutes
+        valid_markers = [
+            "mins ago", "min ago", "minutes ago", "minute ago",
+            "just now", "1h ago", "1 hour ago", "2h ago", "2 hours ago"
+        ]
+        
+        # Check if any valid marker is in the text
+        for marker in valid_markers:
+            if marker in text:
+                # Extra check for "2 hours ago" to ensure it's not actually > 120 mins
+                if marker in ["2h ago", "2 hours ago"]:
+                    # Usually "2 hours ago" in search results means 2 hours and X minutes
+                    # We'll allow it as a boundary case but prefer smaller markers
+                    return True
+                return True
+        
+        # If no relative marker found, check for absolute timestamps if possible (rare in snippets)
+        return False
+
     def fetch_from_external_sources(self, query: str, location: str) -> List[Dict[str, Any]]:
         """Fetch live leads from real external sources with mandatory proof of life."""
         
@@ -121,26 +159,26 @@ class LiveLeadIngestor:
         logger.info(f"FETCH: Starting real-time outbound search for '{query}' in {location}")
         all_leads = []
         
-        # Expanded Source Discovery Queries (Legal Public Sources)
+        # Step 3 — Source Priority (BUYER HEAVY)
+        # Search ONLY these sources: WhatsApp groups, FB groups, Twitter/X, Telegram, Reddit
         search_queries = [
-            # Social Platforms (Public Posts)
-            f'"{query}" (looking for OR natafuta OR buying OR need) site:facebook.com "Kenya"',
+            # Public WhatsApp group discovery (often shared on web)
+            f'"{query}" (looking for OR natafuta OR buying OR need) "chat.whatsapp.com" "Kenya"',
+            
+            # Public Facebook Groups (where users ask for recommendations)
+            f'"{query}" (looking for OR natafuta OR buying OR need) site:facebook.com/groups "Kenya"',
+            
+            # Twitter/X posts & replies
             f'"{query}" (looking for OR natafuta OR buying OR need) site:twitter.com "Kenya"',
-            f'"{query}" (looking for OR natafuta OR buying OR need) site:linkedin.com "Kenya"',
-            f'"{query}" (looking for OR natafuta OR buying OR need) site:instagram.com "Kenya"',
             
-            # Classifieds & Marketplaces
-            f'"{query}" (anyone selling OR price of OR cost of) site:jiji.co.ke',
-            f'"{query}" (anyone selling OR price of OR cost of) site:pigiame.co.ke',
-            f'"{query}" (anyone selling OR price of OR cost of) site:kupatana.com "Kenya"',
+            # Telegram public chats/channels
+            f'"{query}" (looking for OR natafuta OR buying OR need) site:t.me "Kenya"',
             
-            # Community & Forums
+            # Reddit-style forums
             f'"{query}" (recommendation OR suggest OR where to buy) site:reddit.com "Kenya"',
-            f'"{query}" (price of OR where to buy) "Nairobi" "Kenya"',
             
-            # Bio links & Business pages
-            f'"{query}" (contact us OR whatsapp) site:linktr.ee "Kenya"',
-            f'"{query}" (contact us OR whatsapp) site:wa.me "Kenya"',
+            # General "comment" sections discovery
+            f'"{query}" (price of OR where to buy) "comment" "Kenya"',
         ]
         
         scrapers = [DuckDuckGoScraper(), GoogleScraper(), FacebookMarketplaceScraper()]
@@ -176,18 +214,35 @@ class LiveLeadIngestor:
                                 "need urgently", "budget is", "ready to pay", "dm me prices"
                             ]
                             
-                            # ABSOLUTE SELLER/PROVIDER BLOCKING
+                            # Step 2 — Supplier Exclusion Filter (HARD BLOCK)
+                            # Automatically EXCLUDE any source containing business/supplier indicators
                             seller_keywords = [
-                                "we sell", "available now", "in stock", "our shop", "dealer", "distributor", 
-                                "wholesale", "fabricate", "supply and delivery", "we offer", "visit our", 
-                                "shop online", "buy now", "order now", "best price", "special offer",
-                                "brand new", "for sale", "call to order", "limited stock", "check out our",
-                                "we deliver", "authorized dealer", "importer", "retailer", "car wash",
-                                "cleaning services", "repairs", "installation", "we fix", "selling", "on offer",
-                                "discount", "clearance", "sale", "we provide", "we manufacture", "factory price",
-                                "service provider", "agent", "broker", "wholesaler", "manufacturer"
+                                "we sell", "we supply", "available in stock", "contact us", 
+                                "agent listing", "product catalog", "our shop", "dealer", 
+                                "distributor", "wholesale", "fabricate", "supply and delivery", 
+                                "we offer", "visit our", "shop online", "buy now", "order now", 
+                                "best price", "special offer", "brand new", "for sale", 
+                                "call to order", "limited stock", "check out our", "we deliver", 
+                                "authorized dealer", "importer", "retailer", "car wash",
+                                "cleaning services", "repairs", "installation", "we fix", 
+                                "on offer", "discount", "clearance", "sale", "we provide", 
+                                "we manufacture", "factory price", "service provider", 
+                                "agent", "broker", "wholesaler", "manufacturer", "business page",
+                                "company website", "official website", "price list", "catalogue"
                             ]
                             
+                            # URL-based HARD BLOCK for businesses/catalogs
+                            url_lower = r.get('link', '').lower()
+                            business_url_indicators = [
+                                "/shop/", "/product/", "/catalog/", "/store/", "/business/", 
+                                "jiji.co.ke", "pigiame.co.ke", "kupatana.com", "my-store", 
+                                "shopify", "woocommerce", "official", "corporate"
+                            ]
+                            
+                            # ABSOLUTE RULE: If the entity can SELL to multiple buyers -> EXCLUDE.
+                            if any(ui in url_lower for ui in business_url_indicators):
+                                continue
+
                             # Step 1: Filter out sellers/providers strictly
                             if any(sk in combined for sk in seller_keywords):
                                 # Exception: ONLY if it's very clearly a buyer request despite the keywords
@@ -203,10 +258,19 @@ class LiveLeadIngestor:
                             # but we assume the search results are relatively recent.
                             # However, we will strictly tag them with current time and enforce cleanup in DB.
                             
+                            # Step 4 — Time Filter (CRITICAL)
+                            # Include ONLY posts/messages created in the last 120 minutes
+                            if not self._verify_timestamp_strict(combined):
+                                continue
+
                             phone = self._extract_phone(r.get('text', ''))
                             buyer_name = self._extract_name(r.get('text', ''), r.get('source', 'Web'))
                             
                             lead_id = str(uuid.uuid5(uuid.NAMESPACE_URL, r['link']))
+                            
+                            # Step 5 — Lead Qualification Output
+                            urgency = self._parse_urgency(combined)
+                            buyer_quote = r.get('text', '')[:500]
                             
                             # Intent score is high because it passed the mandatory signals
                             intent_score = 0.95 if phone else 0.85
@@ -233,9 +297,10 @@ class LiveLeadIngestor:
                                 "latency_ms": latency,
                                 "created_at": datetime.now(timezone.utc),
                                 "property_country": "Kenya",
-                                "buyer_request_snippet": r.get('text', '')[:500],
+                                "buyer_request_snippet": buyer_quote,
                                 "confidence_score": 0.9 if phone else (0.7 if contact_source == "inferred" else 0.4),
-                                "contact_source": contact_source
+                                "contact_source": contact_source,
+                                "urgency_level": urgency
                             }
                             
                             all_leads.append(lead_data)

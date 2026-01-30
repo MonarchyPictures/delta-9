@@ -49,9 +49,11 @@ class DuckDuckGoScraper(BaseScraper):
             with DDGS() as ddgs:
                 ddg_results = list(ddgs.text(query, max_results=10))
                 for r in ddg_results:
+                    # Capture snippet text if available in DDGS
+                    body = r.get('body', '')
                     results.append({
                         "link": r['href'],
-                        "text": f"{r['title']} {r['body']}",
+                        "text": f"{r['title']} {body}",
                         "source": "DuckDuckGo"
                     })
         except Exception as e:
@@ -75,9 +77,11 @@ class GoogleScraper(BaseScraper):
         for g in search_results:
             link_tag = g.select_one('a')
             title_tag = g.select_one('h3') or g.select_one('div[role="heading"]') or g.select_one('div.vv77sc')
+            snippet_tag = g.select_one('div.VwiC3b') or g.select_one('div.kb0u9b') or g.select_one('div.st')
             
             link = link_tag['href'] if link_tag and link_tag.has_attr('href') else ""
             title = title_tag.text if title_tag else ""
+            snippet = snippet_tag.text if snippet_tag else ""
             
             if not title and link_tag:
                 title = link_tag.get_text()
@@ -86,7 +90,7 @@ class GoogleScraper(BaseScraper):
                 link = link.split('/url?q=')[1].split('&')[0]
                 
             if link and title and not link.startswith('https://accounts.google.com') and not link.startswith('/search'):
-                results.append({"link": link, "text": title, "source": "Google"})
+                results.append({"link": link, "text": f"{title} {snippet}", "source": "Google"})
         
         return results
 
