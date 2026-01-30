@@ -8,7 +8,7 @@ from datetime import datetime
 from urllib.parse import quote
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 from googlesearch import search as google_search
 from scraper import LeadScraper
 

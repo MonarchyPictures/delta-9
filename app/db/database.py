@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 import os
 
@@ -10,8 +10,24 @@ if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 engine = create_engine(
-    DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+    DATABASE_URL, 
+    connect_args={"check_same_thread": False, "timeout": 30} if "sqlite" in DATABASE_URL else {}
 )
+
+# PROD_STRICT: Enable WAL mode for SQLite to prevent "database is locked" errors
+if "sqlite" in DATABASE_URL:
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        try:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.close()
+        except Exception as e:
+            # If we can't set WAL mode because it's locked, it might already be in WAL mode
+            # or will be set by another connection later. Don't crash.
+            pass
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db():

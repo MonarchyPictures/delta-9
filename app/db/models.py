@@ -52,8 +52,10 @@ class Lead(Base):
     property_country = Column(String, default="Kenya", index=True)
     is_hot_lead = Column(Integer, default=0)
     buyer_request_snippet = Column(String)
+    urgency_level = Column(String, default="low") # NEW: High/Medium/Low
     confidence_score = Column(Float, default=0.0)
     is_saved = Column(Integer, default=0)
+    is_verified_signal = Column(Integer, default=1) # PROD_STRICT: Signal verification flag
     notes = Column(String)
     contact_source = Column(String) # public | inferred | unavailable
     
@@ -72,7 +74,9 @@ class Lead(Base):
             "whatsapp_link": self.whatsapp_link,
             "status": self.status.value,
             "source_url": self.source_url,
-            "buyer_request_snippet": self.buyer_request_snippet,
+            "buyer_intent_quote": self.buyer_request_snippet, # Step 5: Exact text
+            "urgency_level": getattr(self, "urgency_level", "low"), # Ensure it exists
+            "contact_method": self.whatsapp_link or f"DM via {self.source_platform}",
             "confidence_score": self.confidence_score,
             "contact_source": self.contact_source
         }

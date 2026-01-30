@@ -3,6 +3,7 @@ import { Search, Activity, Target } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import LeadCard from '../components/LeadCard';
+import { EmptyState } from '../components/UXStates';
 import getApiUrl, { getApiKey } from '../config';
 
 const Dashboard = () => {
@@ -33,6 +34,13 @@ const Dashboard = () => {
     
     const controller = new AbortController();
     searchControllerRef.current = controller;
+    
+    // Increased timeout for deep discovery (100s) to align with backend
+    const timeoutId = setTimeout(() => {
+      if (searchControllerRef.current === controller) {
+        controller.abort();
+      }
+    }, 100000);
 
     try {
       const apiUrl = getApiUrl();
@@ -57,6 +65,8 @@ const Dashboard = () => {
           cache: 'no-store' // ENFORCED: No cached data
         });
         
+        clearTimeout(timeoutId);
+        
         if (!searchRes.ok) {
           const errorData = await searchRes.json().catch(() => ({ detail: 'Unknown error' }));
           throw new Error(errorData.detail || `Server returned ${searchRes.status}`);
@@ -67,8 +77,18 @@ const Dashboard = () => {
           setLeads(searchData.results);
           setLoading(false);
           return;
+        } else if (searchData.status === 'zero_results' || (searchData.results && searchData.results.length === 0)) {
+          // USER-FRIENDLY: Handle zero results without throwing a scary error
+          setErrorMessage("No verified signals found for this search. Try a broader keyword.");
+          setLoading(false);
+          return;
+        } else if (searchData.message) {
+          // Step 6: Zero results rule
+          setErrorMessage(searchData.message);
+          setLoading(false);
+          return;
         } else {
-          throw new Error('ERROR: No live sources returned data.');
+          throw new Error('No live sources returned data.');
         }
       }
 
@@ -83,7 +103,12 @@ const Dashboard = () => {
 
       if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
       const data = await res.json();
-      setLeads(data);
+      // Handle both { leads: [] } and [] formats
+      if (data && data.leads) {
+        setLeads(data.leads);
+      } else {
+        setLeads(Array.isArray(data) ? data : []);
+      }
     } catch (err) {
       if (err.name === 'AbortError') return;
       if (!isPolling) {
@@ -195,7 +220,9 @@ const Dashboard = () => {
                   </div>
                 ) : leads.length > 0 ? leads.map((lead) => (
                   <LeadCard key={lead.lead_id} lead={lead} onStatusChange={handleStatusChange} />
-                )) : null}
+                )) : (
+                  <EmptyState />
+                )}
               </div>
             </div>
           </motion.div>

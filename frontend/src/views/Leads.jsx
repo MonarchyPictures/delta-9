@@ -49,7 +49,7 @@ const Leads = () => {
       if (abortControllerRef.current === controller) {
         controller.abort();
       }
-    }, 30000);
+    }, 100000); // Increased to 100s for reliability
 
     try {
       const apiUrl = getApiUrl();
@@ -78,7 +78,7 @@ const Leads = () => {
       if (res.ok) {
         const data = await res.json();
         // Handle the Zero Results Rule response from backend
-        if (data && data.message && data.leads) {
+        if (data && data.leads) {
           // AUTO-ADJUST: If no leads found in 2h window, automatically switch to 24h
           if ((!timeRange || timeRange === '2h' || timeRange === '') && data.leads.length === 0) {
              console.log("No leads in 2h window, auto-switching to 24h...");
@@ -87,7 +87,7 @@ const Leads = () => {
           }
           setLeads(data.leads);
         } else {
-          setLeads(data);
+          setLeads(Array.isArray(data) ? data : []);
         }
         setLastUpdated(new Date());
       } else {
@@ -96,9 +96,11 @@ const Leads = () => {
       }
     } catch (err) {
       clearTimeout(timeoutId);
+      // ABSOLUTELY SILENT on AbortError to prevent console clutter
       if (err.name === 'AbortError') return;
+      
       if (!isPolling) {
-        console.error("Fetch leads failed:", err);
+        console.debug("Fetch leads failed or cancelled:", err.message);
         setError(err.message);
       }
     } finally {

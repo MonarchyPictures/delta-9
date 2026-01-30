@@ -142,30 +142,25 @@ const App = () => {
     const activeControllerRef = { current: null };
 
     const fetchNotifications = async () => {
-      // If a request is already in progress, simply skip this poll cycle
+      // If a request is already in progress or component unmounted, skip this poll cycle
       if (activeControllerRef.current || !isMounted) return;
       
       const controller = new AbortController();
       activeControllerRef.current = controller;
       
-      // Use a significantly longer timeout to allow network latency in Kenya
+      // Use a robust timeout for high-latency environments (increased to 100s)
       const timeoutId = setTimeout(() => {
         if (activeControllerRef.current === controller) {
-          try {
-            controller.abort();
-          } catch (e) {
-            // Ignore abort errors
-          }
+          controller.abort();
         }
-      }, 45000); 
+      }, 100000); 
 
       try {
         const res = await fetch(`${apiUrl}/notifications`, {
           signal: controller.signal,
           headers: { 
             'X-API-Key': apiKey,
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
+            'Cache-Control': 'no-cache'
           }
         });
         
@@ -183,18 +178,20 @@ const App = () => {
         }
       } catch (err) {
         clearTimeout(timeoutId);
-        // SILENT CATCH: Never log AbortError or standard failures during polling to keep console clean
-        if (err.name !== 'AbortError') {
-          // If we get a real network error, we might want to back off the polling frequency
-          console.warn("Notification poll failed (network issues), retrying in 30s...");
+        // ABSOLUTELY SILENT on AbortError to prevent console clutter in dev environment
+        if (err.name === 'AbortError') return;
+        
+        if (isMounted) {
+          // Only log real errors, not cancellations
+          console.debug("Notification poll skipped or failed:", err.message);
         }
       } finally {
         if (activeControllerRef.current === controller) {
           activeControllerRef.current = null;
         }
-        // Schedule next poll only if still mounted
+        // Schedule next poll ONLY after the previous one is fully complete (success or fail)
         if (isMounted) {
-          pollTimer = setTimeout(fetchNotifications, 30000);
+          pollTimer = setTimeout(fetchNotifications, 60000); // Poll every 60s
         }
       }
     };
@@ -206,6 +203,7 @@ const App = () => {
       if (pollTimer) clearTimeout(pollTimer);
       if (activeControllerRef.current) {
         activeControllerRef.current.abort();
+        activeControllerRef.current = null;
       }
     };
   }, [notificationsEnabled, soundEnabled]);
