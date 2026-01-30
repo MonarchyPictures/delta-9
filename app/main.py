@@ -4,6 +4,8 @@ import time
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, Form, Header, Query, BackgroundTasks
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -142,11 +144,16 @@ def verify_api_key(x_api_key: str = Header(None)):
 
 @app.get("/")
 def read_root():
+    # If frontend/dist exists, serve index.html, otherwise return API status
+    index_path = os.path.join("frontend", "dist", "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
     return {
         "status": "online",
         "message": "Delta9 Production API - Kenya Market Intelligence Node",
         "version": "1.0.0",
-        "region": "Kenya"
+        "region": "Kenya",
+        "ui_status": "not_built"
     }
 
 # 2. UPDATE BACKEND TO ENFORCE KENYA FILTER
@@ -471,7 +478,32 @@ def clear_notifications(db: Session = Depends(get_db)):
     db.commit()
     return {"status": "ok"}
 
-@app.post("/settings", dependencies=[Depends(verify_api_key)])
+@app.post("/settings", dependencies=[Depends(verify_api_key)])  
 async def update_settings(request: Request, db: Session = Depends(get_db)):
     data = await request.json()
     return {"status": "Settings updated", "data": data}
+
+# 9. SERVE FRONTEND (SPA Support)
+# Mount static files from the frontend build directory
+dist_path = os.path.join("frontend", "dist")
+if os.path.exists(dist_path):
+    # Check for assets directory before mounting
+    assets_path = os.path.join(dist_path, "assets")
+    if os.path.exists(assets_path):
+        app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+    
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # Skip if path is an API endpoint (should have been caught above)
+        if full_path.startswith("api/") or full_path.startswith("notifications") or full_path.startswith("leads"):
+            raise HTTPException(status_code=404)
+            
+        file_path = os.path.join(dist_path, full_path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        
+        index_file = os.path.join(dist_path, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
+        
+        raise HTTPException(status_code=404)

@@ -1,12 +1,10 @@
 services:
-  # 1. Backend Web Service (FastAPI)
+  # Consolidated Web Service (FastAPI + React)
   - type: web
-    name: delta9-backend
-    env: python
+    name: delta9-platform
+    env: docker
     region: ohio
-    plan: free
-    buildCommand: pip install -r requirements.txt && playwright install chromium
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    plan: free # Note: torch/transformers might require a larger plan if they use too much RAM
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -18,26 +16,10 @@ services:
           property: connectionString
       - key: SERPAPI_API_KEY
         sync: false # User will need to add this manually in Render Dashboard
-
-  # 2. Frontend Static Site (React/Vite)
-  - type: static
-    name: delta9-frontend
-    env: static
-    region: ohio
-    plan: free
-    buildCommand: npm install && npm run build
-    publishPath: dist
-    rootDir: frontend
-    envVars:
-      - key: VITE_API_URL
-        fromService:
-          type: web
-          name: delta9-backend
-          property: host
+      - key: VITE_API_URL # Optional since it defaults to /api in config.js
+        value: /api
       - key: VITE_API_KEY
         value: d9_prod_secret_key_2024
-      - key: NODE_VERSION
-        value: 18
 
 databases:
   - name: delta9-db
