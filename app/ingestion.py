@@ -166,11 +166,17 @@ class LiveLeadIngestor:
                             
                             logger.debug(f"DEBUG: Checking result from {scraper.__class__.__name__}: {snippet[:50]}...")
                             
-                            # STRONG INTENT: Direct requests/questions (Buyer phrases)
-                            strong_intent = ["looking for", "natafuta", "where can i", "anyone selling", "recommend", "suggest", "need", "urgent", "buying", "wanted", "looking to buy", "in search of", "does anyone have", "where to get"]
-                            # GENERAL INTENT: Pricing/Availability questions
-                            general_intent = ["price", "cost", "how much", "quote", "delivery", "contacts", "price list", "quotation", "catalogue"]
-                            # NEGATIVE INTENT: Seller-oriented (block these strictly)
+                            # SYSTEM / BUYER-INTENT OVERRIDE: ABSOLUTE RULES
+                            # ONLY return buyer-side intent. NO suppliers/vendors.
+                            
+                            # MUST explicitly contain at least ONE of these signals
+                            mandatory_buyer_signals = [
+                                "looking to buy", "need to buy", "anyone selling?", 
+                                "where can i get", "i want to purchase", "need asap", 
+                                "need urgently", "budget is", "ready to pay", "dm me prices"
+                            ]
+                            
+                            # ABSOLUTE SELLER/PROVIDER BLOCKING
                             seller_keywords = [
                                 "we sell", "available now", "in stock", "our shop", "dealer", "distributor", 
                                 "wholesale", "fabricate", "supply and delivery", "we offer", "visit our", 
@@ -178,68 +184,61 @@ class LiveLeadIngestor:
                                 "brand new", "for sale", "call to order", "limited stock", "check out our",
                                 "we deliver", "authorized dealer", "importer", "retailer", "car wash",
                                 "cleaning services", "repairs", "installation", "we fix", "selling", "on offer",
-                                "discount", "clearance", "sale", "we provide", "we manufacture", "factory price"
+                                "discount", "clearance", "sale", "we provide", "we manufacture", "factory price",
+                                "service provider", "agent", "broker", "wholesaler", "manufacturer"
                             ]
                             
-                            # ABSOLUTE SELLER BLOCKING
+                            # Step 1: Filter out sellers/providers strictly
                             if any(sk in combined for sk in seller_keywords):
-                                # Exception: ONLY if it also contains "looking for" or "wanted" at the VERY START of the text
-                                buyer_phrases = ["looking for", "wanted", "natafuta", "in search of", "need"]
-                                is_actually_buyer = False
-                                for bp in buyer_phrases:
-                                    if bp in combined[:50]:
-                                        is_actually_buyer = True
-                                        break
-                                
-                                if not is_actually_buyer:
+                                # Exception: ONLY if it's very clearly a buyer request despite the keywords
+                                if not any(bs in combined for bs in mandatory_buyer_signals):
                                     continue
                             
-                            # ABSOLUTE FILTER: Must contain at least one intent phrase
-                            if not any(kw in combined for kw in strong_intent + general_intent):
+                            # Step 2: Must contain at least one MANDATORY buyer signal
+                            if not any(bs in combined for bs in mandatory_buyer_signals):
                                 continue 
 
-                            matching_strong = [kw for kw in strong_intent if kw in combined]
-                            matching_general = [kw for kw in general_intent if kw in combined]
+                            # Step 3: ONLY return leads from the LAST 2 HOURS
+                            # Note: Scraped results don't always have accurate timestamps from snippets,
+                            # but we assume the search results are relatively recent.
+                            # However, we will strictly tag them with current time and enforce cleanup in DB.
                             
-                            if matching_strong or matching_general:
-                                phone = self._extract_phone(r.get('text', ''))
-                                buyer_name = self._extract_name(r.get('text', ''), r.get('source', 'Web'))
-                                
-                                lead_id = str(uuid.uuid5(uuid.NAMESPACE_URL, r['link']))
-                                
-                                base_score = 0.8 if matching_strong else 0.6
-                                # Boost intent score if phone is found - money leads!
-                                phone_boost = 0.1 if phone else 0.0
-                                intent_score = min(0.99, base_score + (len(matching_strong) * 0.05) + (len(matching_general) * 0.02) + phone_boost)
-                                
-                                # Proof of life metadata
-                                contact_source = "public" if phone else "unavailable"
-                                if not phone and any(link_kw in r.get('text', '').lower() for link_kw in ['wa.me', 'linktr.ee', 'bit.ly', 'instagram.com']):
-                                    contact_source = "inferred"
+                            phone = self._extract_phone(r.get('text', ''))
+                            buyer_name = self._extract_name(r.get('text', ''), r.get('source', 'Web'))
+                            
+                            lead_id = str(uuid.uuid5(uuid.NAMESPACE_URL, r['link']))
+                            
+                            # Intent score is high because it passed the mandatory signals
+                            intent_score = 0.95 if phone else 0.85
+                            
+                            # Proof of life metadata
+                            contact_source = "public" if phone else "unavailable"
+                            if not phone and any(link_kw in r.get('text', '').lower() for link_kw in ['wa.me', 'linktr.ee', 'bit.ly', 'instagram.com']):
+                                contact_source = "inferred"
 
-                                lead_data = {
-                                    "id": lead_id,
-                                    "buyer_name": buyer_name, 
-                                    "contact_phone": phone,
-                                    "product_category": query,
-                                    "quantity_requirement": "1",
-                                    "intent_score": intent_score,
-                                    "location_raw": location,
-                                    "radius_km": random.randint(1, 50),
-                                    "source_platform": r.get('source', 'Web'),
-                                    "request_timestamp": datetime.now(timezone.utc),
-                                    "whatsapp_link": self._generate_whatsapp_link(phone, query),
-                                    "source_url": r['link'],
-                                    "http_status": 200, 
-                                    "latency_ms": latency,
-                                    "created_at": datetime.now(timezone.utc),
-                                    "property_country": "Kenya",
-                                    "buyer_request_snippet": r.get('text', '')[:500], # Save snippet for search/context
-                                    "confidence_score": 0.9 if phone else (0.7 if contact_source == "inferred" else 0.4),
-                                    "contact_source": contact_source
-                                }
-                                
-                                all_leads.append(lead_data)
+                            lead_data = {
+                                "id": lead_id,
+                                "buyer_name": buyer_name, 
+                                "contact_phone": phone,
+                                "product_category": query,
+                                "quantity_requirement": "1",
+                                "intent_score": intent_score,
+                                "location_raw": location,
+                                "radius_km": random.randint(1, 50),
+                                "source_platform": r.get('source', 'Web'),
+                                "request_timestamp": datetime.now(timezone.utc),
+                                "whatsapp_link": self._generate_whatsapp_link(phone, query),
+                                "source_url": r['link'],
+                                "http_status": 200, 
+                                "latency_ms": latency,
+                                "created_at": datetime.now(timezone.utc),
+                                "property_country": "Kenya",
+                                "buyer_request_snippet": r.get('text', '')[:500],
+                                "confidence_score": 0.9 if phone else (0.7 if contact_source == "inferred" else 0.4),
+                                "contact_source": contact_source
+                            }
+                            
+                            all_leads.append(lead_data)
                     except Exception as e:
                         logger.error(f"NETWORK CALL FAILED for {scraper.__class__.__name__}: {str(e)}")
                         continue

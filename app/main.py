@@ -74,8 +74,25 @@ def fetch_live_leads_job():
     finally:
         db.close()
 
+async def cleanup_old_leads():
+    """ABSOLUTE RULE: ONLY return leads from the LAST 2 HOURS. Remove everything else."""
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        two_hours_ago = now - timedelta(hours=2)
+        deleted = db.query(models.Lead).filter(models.Lead.created_at < two_hours_ago).delete()
+        db.commit()
+        if deleted > 0:
+            print(f"--- Background Cleanup: Purged {deleted} stale leads (> 2h old) ---")
+    except Exception as e:
+        print(f"--- Background Cleanup ERROR: {str(e)} ---")
+    finally:
+        db.close()
+
 # Run ingestion every 5 minutes in production to ensure "LIVE" leads
 scheduler.add_job(fetch_live_leads_job, 'interval', minutes=5)
+# Run cleanup every 10 minutes to enforce the 2-hour window strictly
+scheduler.add_job(cleanup_old_leads, 'interval', minutes=10)
 scheduler.start()
 
 print("--- Delta9 API Starting Up with Background Scheduler ---")
@@ -158,14 +175,20 @@ def get_leads(
         if radius:
             db_query = db_query.filter(models.Lead.radius_km <= radius)
 
-        if time_range:
-            now = datetime.now(timezone.utc)
-            if time_range == "1h":
-                db_query = db_query.filter(models.Lead.created_at >= now - timedelta(hours=1))
+        # SYSTEM / BUYER-INTENT OVERRIDE: 2-hour window enforcement
+        now = datetime.now(timezone.utc)
+        if not time_range:
+            # Default to 2 hours if not specified
+            db_query = db_query.filter(models.Lead.created_at >= now - timedelta(hours=2))
+        else:
+            if time_range == "2h":
+                db_query = db_query.filter(models.Lead.created_at >= now - timedelta(hours=2))
             elif time_range == "24h":
                 db_query = db_query.filter(models.Lead.created_at >= now - timedelta(days=1))
             elif time_range == "72h":
                 db_query = db_query.filter(models.Lead.created_at >= now - timedelta(days=3))
+            elif time_range == "1h":
+                db_query = db_query.filter(models.Lead.created_at >= now - timedelta(hours=1))
 
         if has_whatsapp:
             db_query = db_query.filter(models.Lead.contact_phone.isnot(None))

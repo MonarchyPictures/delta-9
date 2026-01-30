@@ -186,7 +186,7 @@ const Leads = () => {
                 onChange={(e) => setTimeRange(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-white text-xs font-black uppercase tracking-widest focus:outline-none appearance-none cursor-pointer hover:bg-white/10 transition-colors"
               >
-                <option value="" className="bg-neutral-900">Any Time</option>
+                <option value="" className="bg-neutral-900">Last 2h (Active)</option>
                 <option value="1h" className="bg-neutral-900">Last 1h</option>
                 <option value="24h" className="bg-neutral-900">Last 24h</option>
                 <option value="72h" className="bg-neutral-900">Last 72h</option>

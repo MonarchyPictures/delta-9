@@ -120,6 +120,15 @@ const Dashboard = () => {
     if (e.key === 'Enter' && query.trim()) fetchLeads(query);
   };
 
+  const trendingSearches = [
+    { term: 'water tank', label: 'Water Tanks' },
+    { term: 'construction materials', label: 'Construction' },
+    { term: 'solar panels', label: 'Solar' },
+    { term: 'tires', label: 'Tires' },
+    { term: 'electronics', label: 'Electronics' },
+    { term: 'rims', label: 'Rims' }
+  ];
+
   return (
     <div className={`flex-1 flex flex-col ${!hasSearched ? 'justify-center' : 'pt-12'} bg-black overflow-hidden`}>
       <div className="w-full max-w-4xl mx-auto px-4 mb-8">
@@ -132,7 +141,7 @@ const Dashboard = () => {
           </div>
         )}
 
-        <div className="relative group">
+        <div className="relative group mb-6">
           <Search className="absolute left-6 top-1/2 -translate-y-1/2 h-6 w-6 text-white/20 group-focus-within:text-blue-500" />
           <input
             type="text"
@@ -140,9 +149,27 @@ const Dashboard = () => {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleSearch}
             placeholder="READ: Search Nairobi buyer intent (e.g. 'tires')..."
-            className="w-full bg-white/5 border border-white/10 text-white text-xl rounded-3xl pl-16 p-6 shadow-2xl outline-none font-bold placeholder:text-white/20 italic"
+            className="w-full bg-white/5 border border-white/10 text-white text-xl rounded-3xl pl-16 p-6 shadow-2xl outline-none font-bold placeholder:text-white/20 italic focus:border-blue-500/50 focus:bg-white/10 transition-all"
           />
         </div>
+
+        {!hasSearched && (
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <span className="text-[10px] font-black text-white/20 uppercase tracking-widest mr-2">Trending in Kenya:</span>
+            {trendingSearches.map((item) => (
+              <button
+                key={item.term}
+                onClick={() => {
+                  setQuery(item.term);
+                  fetchLeads(item.term);
+                }}
+                className="px-4 py-2 rounded-full bg-white/5 border border-white/10 text-white/60 text-xs font-bold hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all uppercase tracking-wider"
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <AnimatePresence>

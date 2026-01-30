@@ -151,7 +151,11 @@ const App = () => {
       // Use a slightly longer timeout to allow network latency in Kenya
       const timeoutId = setTimeout(() => {
         if (activeControllerRef.current === controller) {
-          controller.abort();
+          try {
+            controller.abort();
+          } catch (e) {
+            // Ignore abort errors
+          }
         }
       }, 25000); 
 
@@ -180,7 +184,10 @@ const App = () => {
       } catch (err) {
         clearTimeout(timeoutId);
         // SILENT CATCH: Never log AbortError or standard failures during polling to keep console clean
-        // The ERR_ABORTED is expected when we cancel previous requests or timeout
+        if (err.name !== 'AbortError') {
+          // Only log non-abort errors if needed for debugging
+          // console.error("Poll error:", err);
+        }
       } finally {
         if (activeControllerRef.current === controller) {
           activeControllerRef.current = null;
