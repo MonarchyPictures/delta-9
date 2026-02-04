@@ -66,6 +66,54 @@ class BaseScraper(abc.ABC):
             logger.error(f"PLAYWRIGHT: Browser launch/context error: {str(e)}")
             return None
 
+class GoogleCSEScraper(BaseScraper):
+    def __init__(self, api_key=None, cx=None):
+        super().__init__()
+        # Priority 1: Passed key, Priority 2: Env Var, Priority 3: Provided by user
+        self.api_key = api_key or os.getenv("GOOGLE_CSE_API_KEY", "AIzaSyBGQ7FpAkvzWgd_v7FjLm_1fGlI8z5aZNI")
+        self.cx = cx or os.getenv("GOOGLE_CSE_ID", "b19c2ccb43df84d2e")
+
+    def scrape(self, query, time_window_hours=2):
+        logger.info(f"OUTBOUND CALL: Google CSE Scrape for {query} (Window: {time_window_hours}h)")
+        
+        # Google CSE doesn't support tbs directly in the same way as standard search
+        # but we can use dateRestrict. Valid values: d[number], w[number], m[number], y[number]
+        date_restrict = "d1" # Default to last 24h
+        if time_window_hours <= 24:
+            date_restrict = "d1"
+        elif time_window_hours <= 168:
+            date_restrict = "w1"
+        else:
+            date_restrict = "m1"
+            
+        params = {
+            "q": query,
+            "key": self.api_key,
+            "cx": self.cx,
+            "dateRestrict": date_restrict,
+            "num": 10
+        }
+        
+        results = []
+        try:
+            response = requests.get("https://www.googleapis.com/customsearch/v1", params=params, timeout=20)
+            if response.status_code == 200:
+                data = response.json()
+                for item in data.get("items", []):
+                    results.append({
+                        "link": item.get("link"),
+                        "text": f"{item.get('title', '')} {item.get('snippet', '')}",
+                        "source": "Google CSE",
+                        "metadata": item.get("pagemap", {})
+                    })
+                logger.info(f"Google CSE Scrape: Found {len(results)} results for {query}")
+            else:
+                logger.error(f"Google CSE Error: Status {response.status_code} - {response.text}")
+        except Exception as e:
+            logger.error(f"Google CSE Scrape Exception: {e}")
+            
+        return results
+
 class SerpApiScraper(BaseScraper):
     def __init__(self, api_key=None):
         super().__init__()

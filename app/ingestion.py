@@ -7,7 +7,7 @@ import requests
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
-from .scrapers.base_scraper import GoogleScraper, FacebookMarketplaceScraper, DuckDuckGoScraper, SerpApiScraper
+from .scrapers.base_scraper import GoogleScraper, FacebookMarketplaceScraper, DuckDuckGoScraper, SerpApiScraper, GoogleCSEScraper
 
 # ABSOLUTE RULE: PROD STRICT ENFORCEMENT
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
@@ -242,8 +242,8 @@ class LiveLeadIngestor:
         all_leads = []
         from concurrent.futures import ThreadPoolExecutor, as_completed
         
-        # Prioritize SerpApi, then others
-        scrapers = [SerpApiScraper(), DuckDuckGoScraper(), GoogleScraper(), FacebookMarketplaceScraper()]
+        # Prioritize Google CSE, SerpApi, then others
+        scrapers = [GoogleCSEScraper(), SerpApiScraper(), DuckDuckGoScraper(), GoogleScraper(), FacebookMarketplaceScraper()]
         
         for pass_idx, pass_queries in enumerate(discovery_passes):
             logger.info(f"PASS {pass_idx + 1}/{len(discovery_passes)}: Starting parallel discovery...")

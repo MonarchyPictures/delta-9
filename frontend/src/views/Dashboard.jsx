@@ -145,6 +145,17 @@ const Dashboard = () => {
     if (e.key === 'Enter' && query.trim()) fetchLeads(query);
   };
 
+  // Google CSE script effect
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = "https://cse.google.com/cse.js?cx=b19c2ccb43df84d2e";
+    script.async = true;
+    document.body.appendChild(script);
+    return () => {
+      document.body.removeChild(script);
+    };
+  }, []);
+
   const trendingSearches = [
     { term: 'water tank', label: 'Water Tanks' },
     { term: 'construction materials', label: 'Construction' },
@@ -177,6 +188,9 @@ const Dashboard = () => {
             className="w-full bg-white/5 border border-white/10 text-white text-xl rounded-3xl pl-16 p-6 shadow-2xl outline-none font-bold placeholder:text-white/20 italic focus:border-blue-500/50 focus:bg-white/10 transition-all"
           />
         </div>
+
+        {/* Google CSE Search Box */}
+        <div className="gcse-search mb-6"></div>
 
         {!hasSearched && (
           <div className="flex flex-wrap items-center justify-center gap-3">
