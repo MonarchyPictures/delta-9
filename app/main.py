@@ -194,8 +194,7 @@ def get_leads(
         
         # Base query
         db_query = db.query(models.Lead).filter(
-            or_(models.Lead.property_country == "Kenya", models.Lead.property_country.is_(None)),
-            models.Lead.source_url.isnot(None)
+            or_(models.Lead.property_country == "Kenya", models.Lead.property_country.is_(None))
         )
 
         if query:
@@ -370,12 +369,10 @@ def get_settings():
 @app.get("/leads/{lead_id}", dependencies=[Depends(verify_api_key)])
 def get_lead_detail(lead_id: str, db: Session = Depends(get_db)):
     lead = db.query(models.Lead).filter(
-        models.Lead.id == lead_id,
-        models.Lead.source_url.isnot(None),
-        models.Lead.http_status == 200
+        models.Lead.id == lead_id
     ).first()
     if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found or lacks proof-of-life proof")
+        raise HTTPException(status_code=404, detail="Lead not found")
     return lead
 
 @app.get("/leads/search", dependencies=[Depends(verify_api_key)])

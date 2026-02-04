@@ -1,6 +1,6 @@
 from app.db.database import SessionLocal, engine
 from app.db import models, database
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 import uuid
 
 
@@ -10,7 +10,7 @@ def seed_data():
     models.Base.metadata.create_all(bind=database.engine)
     db = SessionLocal()
     
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     
     # Sample leads with Kenya context and varied filter attributes
     sample_leads = [

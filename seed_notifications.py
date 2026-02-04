@@ -1,6 +1,6 @@
 from app.db.database import SessionLocal
 from app.db import models
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 def seed_notifications():
@@ -25,7 +25,7 @@ def seed_notifications():
             agent_id=agent.id,
             message=f"🚨 REAL-TIME ALERT: New lead for '{agent.query}' found on {lead.source_platform}!",
             is_read=0,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         notifications.append(notification)
         db.add(notification)

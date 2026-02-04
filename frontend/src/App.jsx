@@ -35,7 +35,7 @@ const App = () => {
       if (agentsControllerRef.current === controller) {
         controller.abort();
       }
-    }, 20000);
+    }, 60000); // Increased to 60s
     
     try {
       const apiUrl = getApiUrl();
@@ -78,7 +78,7 @@ const App = () => {
 
     const fetchInitialSettings = async () => {
       const requestController = new AbortController();
-      const timeoutId = setTimeout(() => requestController.abort(), 10000); 
+      const timeoutId = setTimeout(() => requestController.abort(), 30000); // Increased to 30s
       
       try {
         const res = await fetch(`${apiUrl}/settings`, {
@@ -159,7 +159,7 @@ const App = () => {
         if (activeControllerRef.current === controller) {
           controller.abort();
         }
-      }, 60000); // 60s timeout for notifications
+      }, 90000); // Increased to 90s for notifications
 
       try {
         const res = await fetch(`${apiUrl}/notifications`, {

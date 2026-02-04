@@ -1,6 +1,6 @@
 from app.db.database import SessionLocal, engine
 from app.db import models
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 import uuid
 import random
 
@@ -19,7 +19,8 @@ def seed_live_leads():
             "intent_score": 0.95,
             "confidence_score": 0.9,
             "status": models.CRMStatus.NEW,
-            "created_at": datetime.utcnow() - timedelta(minutes=random.randint(1, 60))
+            "source_url": "https://facebook.com/groups/kenya-business/posts/1",
+            "created_at": datetime.now(timezone.utc) - timedelta(minutes=random.randint(1, 60))
         },
         {
             "id": str(uuid.uuid4()),
@@ -31,7 +32,8 @@ def seed_live_leads():
             "intent_score": 0.88,
             "confidence_score": 0.85,
             "status": models.CRMStatus.NEW,
-            "created_at": datetime.utcnow() - timedelta(minutes=random.randint(1, 60))
+            "source_url": "https://reddit.com/r/Kenya/comments/1",
+            "created_at": datetime.now(timezone.utc) - timedelta(minutes=random.randint(1, 60))
         },
         {
             "id": str(uuid.uuid4()),
@@ -42,8 +44,9 @@ def seed_live_leads():
             "product_category": "Vehicles",
             "intent_score": 0.92,
             "confidence_score": 0.8,
-            "status": models.ContactStatus.NOT_CONTACTED,
-            "created_at": datetime.utcnow() - timedelta(minutes=random.randint(1, 60))
+            "status": models.CRMStatus.NEW,
+            "source_url": "https://twitter.com/user/status/1",
+            "created_at": datetime.now(timezone.utc) - timedelta(minutes=random.randint(1, 60))
         },
         {
             "id": str(uuid.uuid4()),
@@ -54,8 +57,9 @@ def seed_live_leads():
             "product_category": "Construction",
             "intent_score": 0.85,
             "confidence_score": 0.75,
-            "status": models.ContactStatus.NOT_CONTACTED,
-            "created_at": datetime.utcnow() - timedelta(minutes=random.randint(1, 60))
+            "status": models.CRMStatus.NEW,
+            "source_url": "https://facebook.com/marketplace/item/1",
+            "created_at": datetime.now(timezone.utc) - timedelta(minutes=random.randint(1, 60))
         },
         {
             "id": str(uuid.uuid4()),
@@ -66,8 +70,9 @@ def seed_live_leads():
             "product_category": "Agriculture",
             "intent_score": 0.78,
             "confidence_score": 0.7,
-            "status": models.ContactStatus.NOT_CONTACTED,
-            "created_at": datetime.utcnow() - timedelta(minutes=random.randint(1, 60))
+            "status": models.CRMStatus.NEW,
+            "source_url": "https://tiktok.com/@user/video/1",
+            "created_at": datetime.now(timezone.utc) - timedelta(minutes=random.randint(1, 60))
         }
     ]
     
