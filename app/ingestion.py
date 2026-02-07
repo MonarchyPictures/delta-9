@@ -7,11 +7,38 @@ import requests
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
-from .scrapers.base_scraper import GoogleScraper, FacebookMarketplaceScraper, DuckDuckGoScraper, SerpApiScraper, GoogleCSEScraper
+from .scrapers.base_scraper import BaseScraper
+from .scrapers.facebook_marketplace import FacebookMarketplaceScraper
+from .scrapers.classifieds import ClassifiedsScraper
+from .scrapers.twitter import TwitterScraper
+from .scrapers.google_maps import GoogleMapsScraper
+from .scrapers.reddit import RedditScraper
+from .scrapers.google_cse import GoogleCSEScraper
+from .scrapers.whatsapp_public_groups import WhatsAppPublicGroupScraper
+from .scrapers.instagram import InstagramScraper
+from .config import PROD_STRICT
+from .config.categories.vehicles_ke import VEHICLES_KE
+from .intelligence.confidence import apply_confidence
+from .cache.scraper_cache import get_cached, set_cached
+from .scrapers.registry import SCRAPER_REGISTRY, update_scraper_state, get_active_scrapers
+from .scrapers.selector import decide_scrapers
+from .scrapers.metrics import record_run, SCRAPER_METRICS
+from .scrapers.supervisor import check_scraper_health, reset_consecutive_failures
+from .scrapers.verifier import is_verified_signal, verify_leads
+
+# ALL possible scrapers available in the system
+ALL_SCRAPERS = [ 
+    GoogleMapsScraper(), 
+    ClassifiedsScraper(), 
+    FacebookMarketplaceScraper(), 
+    TwitterScraper(), 
+    RedditScraper(),
+    GoogleCSEScraper(),
+    WhatsAppPublicGroupScraper(),
+    InstagramScraper()
+]
 
 # ABSOLUTE RULE: PROD STRICT ENFORCEMENT
-ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
-
 # Configuration for logging
 logging.basicConfig(
     level=logging.INFO,
@@ -29,8 +56,8 @@ class LiveLeadIngestor:
         self.categories = ["water tank", "construction materials", "electronics", "tires", "solar panels"]
         self.locations = ["Nairobi", "Mombasa", "Kisumu", "Nakuru", "Eldoret"]
         # Enforce production check immediately if initialized for live fetching
-        if ENVIRONMENT != "production":
-            logger.warning("--- WARNING: Delta9 running in DEVELOPMENT mode. Live ingestion restricted to PROD_STRICT. ---")
+        if not PROD_STRICT:
+            logger.warning("--- WARNING: Delta9 running in DEVELOPMENT mode. Auto-downgrading to bootstrap. ---")
 
     def check_network_health(self) -> bool:
         """Verify network connectivity and proxy health before ingestion."""
@@ -194,7 +221,7 @@ class LiveLeadIngestor:
         # Fallback for specific date formats if possible, or return False
         return False, 0
 
-    def fetch_from_external_sources(self, query: str, location: str, time_window_hours: int = 2) -> List[Dict[str, Any]]:
+    def fetch_from_external_sources(self, query: str, location: str, time_window_hours: int = 2, category: Optional[str] = None, last_result_count: int = 0) -> List[Dict[str, Any]]:
         """
         Fetch live leads using MULTI-PASS DISCOVERY (3 PASSES).
         Includes AUTO-EXPANDING TIME WINDOW if zero results found.
@@ -207,7 +234,7 @@ class LiveLeadIngestor:
         
         for current_window in windows_to_try:
             logger.info(f"FETCH: Trying window {current_window}h for '{query}' in {location}")
-            leads = self._execute_discovery(query, location, current_window)
+            leads = self._execute_discovery(query, location, current_window, category, last_result_count)
             if leads:
                 # Add current window info to leads
                 for l in leads:
@@ -216,14 +243,40 @@ class LiveLeadIngestor:
         
         return []
 
-    def _execute_discovery(self, query: str, location: str, time_window_hours: int) -> List[Dict[str, Any]]:
+    def _execute_discovery(self, query: str, location: str, time_window_hours: int, category: Optional[str] = None, last_result_count: int = 0) -> List[Dict[str, Any]]:
         """Internal discovery execution with PARALLEL scraping."""
         # ABSOLUTE RULE: Mandatory health check
         if not self.check_network_health():
-            if ENVIRONMENT == "production":
+            if PROD_STRICT:
                 raise RuntimeError("ERROR: Network health check failed. Ingestion blocked to prevent stale data.")
             else:
-                logger.warning("NETWORK CHECK FAILED: Continuing anyway because ENVIRONMENT != 'production'")
+                logger.warning("NETWORK CHECK FAILED: Continuing anyway because PROD_STRICT=False")
+
+        # --- Adaptive Scraper Control (Trae AI Driven) ---
+        enabled_sources = decide_scrapers(
+            query=query, 
+            location=location, 
+            category=category,
+            time_window_hours=time_window_hours, 
+            is_prod=PROD_STRICT,
+            last_result_count=last_result_count
+        )
+        
+        # 🔒 STEP 3 — CATEGORY-SPECIFIC SCRAPER FILTERING
+        # Mandatory lock for vehicles_ke category
+        if category == "vehicles" or category == "vehicles_ke":
+            authorized_scrapers = get_active_scrapers("vehicles_ke")
+            # Only allow scrapers that are both enabled by AI and authorized for this category
+            enabled_sources = [s for s in enabled_sources if s in authorized_scrapers]
+            logger.info(f"🔒 CATEGORY LOCK: Filtering scrapers for vehicles_ke. Authorized: {authorized_scrapers}")
+
+        # CRITICAL: Filter scrapers at runtime using ClassName registry check
+        active_scrapers = [ 
+            s for s in ALL_SCRAPERS 
+            if s.__class__.__name__ in enabled_sources and SCRAPER_REGISTRY.get(s.__class__.__name__, {}).get("enabled")
+        ]
+        
+        logger.info(f"AI Decision: Active scrapers for this query: {[s.__class__.__name__ for s in active_scrapers]}")
 
         # MULTI-PASS DISCOVERY STRATEGY
         discovery_passes = [
@@ -242,19 +295,48 @@ class LiveLeadIngestor:
         all_leads = []
         from concurrent.futures import ThreadPoolExecutor, as_completed
         
-        # Prioritize Google CSE, SerpApi, then others
-        scrapers = [GoogleCSEScraper(), SerpApiScraper(), DuckDuckGoScraper(), GoogleScraper(), FacebookMarketplaceScraper()]
-        
         for pass_idx, pass_queries in enumerate(discovery_passes):
             logger.info(f"PASS {pass_idx + 1}/{len(discovery_passes)}: Starting parallel discovery...")
             pass_leads = []
             
-            with ThreadPoolExecutor(max_workers=5) as executor:
+            with ThreadPoolExecutor(max_workers=8) as executor:
                 future_to_query = {}
+                
+                def scrape_with_cache(s, q, w):
+                    scraper_name = s.__class__.__name__
+                    cache_key = f"{scraper_name}:{q}:{w}"
+                    cached = get_cached(cache_key)
+                    if cached is not None:
+                        logger.info(f"CACHE: Hit for {cache_key}")
+                        return cached
+                    
+                    try:
+                        res = s.scrape(q, time_window_hours=w)
+                        # Record run metrics
+                        record_run(scraper_name, leads_count=len(res) if res else 0)
+                        
+                        if res:
+                            # Tag leads with scraper name for later verification tracking
+                            for r in res:
+                                r["_scraper_name"] = scraper_name
+                            set_cached(cache_key, res)
+                            
+                            # Success: reset consecutive failures
+                            reset_consecutive_failures(scraper_name)
+                        return res
+                    except Exception as e:
+                        logger.error(f"Scraper {scraper_name} failed: {str(e)}")
+                        record_run(scraper_name, leads_count=0, error=True)
+                        
+                        # Supervisor health check (Auto-disable if unstable)
+                        check_scraper_health(scraper_name)
+                            
+                        return []
+
                 for sq in pass_queries:
-                    for scraper in scrapers:
+                    for scraper in active_scrapers:
                         # Submit each scraper task
-                        future = executor.submit(scraper.scrape, sq, time_window_hours=time_window_hours)
+                        future = executor.submit(scrape_with_cache, scraper, sq, time_window_hours)
                         future_to_query[future] = (sq, scraper.__class__.__name__)
                 
                 for future in as_completed(future_to_query, timeout=90): # Overall timeout for all scrapers
@@ -264,52 +346,26 @@ class LiveLeadIngestor:
                         if not results: continue
 
                         for r in results:
-                            snippet = r.get('text', '').lower()
+                            snippet = r.get('intent_text', '').lower()
                             url_lower = r.get('link', '').lower()
                             
-                            # 🔒 PRODUCTION OVERRIDE: VERIFIED OUTBOUND SIGNALS
-                            mandatory_buyer_signals = [
-                                "looking to buy", "need to buy", "anyone selling?", 
-                                "where can i get", "i want to purchase", "need asap", 
-                                "need urgently", "budget is", "ready to pay", "dm me prices",
-                                "natafuta", "price of", "where to find", "how much is",
-                                "looking for", "recommend a", "suggest a", "how much",
-                                "price?", "inbox price", "available?", "where in",
-                                "selling this?", "want this", "i need", "contact of",
-                                "who has", "supplier of", "buying", "interested in buying"
-                            ]
+                            # 🧪 SANDBOX CHECK: Does this scraper run in sandbox mode?
+                            scraper_config = SCRAPER_REGISTRY.get(scraper_name, {})
+                            is_sandbox = scraper_config.get("mode") == "sandbox"
                             
-                            # 🚫 HARD EXCLUSIONS
-                            seller_keywords = [
-                                "we sell", "we supply", "available in stock", "contact us", 
-                                "agent listing", "product catalog", "our shop", "dealer", 
-                                "distributor", "wholesale", "fabricate", "supply and delivery", 
-                                "we offer", "visit our", "shop online", "buy now", "order now", 
-                                "best price", "special offer", "brand new", "for sale", 
-                                "call to order", "limited stock", "check out our", "we deliver", 
-                                "authorized dealer", "importer", "retailer", "car wash",
-                                "cleaning services", "repairs", "installation", "we fix", 
-                                "on offer", "discount", "clearance", "sale", "we provide", 
-                                "we manufacture", "factory price", "service provider", 
-                                "agent", "broker", "wholesaler", "manufacturer", "business page",
-                                "company website", "official website", "price list", "catalogue",
-                                "listing", "marketplace", "we are selling", "buy from us"
-                            ]
-                            
-                            business_url_indicators = [
-                                "/shop/", "/product/", "/catalog/", "/store/", "/business/", 
-                                "jiji.co.ke", "pigiame.co.ke", "kupatana.com", "my-store", 
-                                "shopify", "woocommerce", "official", "corporate", "co.ke/shop"
-                            ]
-
-                            if any(ui in url_lower for ui in business_url_indicators):
-                                continue
-                            if any(sk in snippet for sk in seller_keywords):
-                                if not any(bs in snippet for bs in mandatory_buyer_signals):
+                            # 🧠 VERIFIER: Check for genuine buyer signal
+                            if not is_verified_signal(snippet, url_lower):
+                                # Non-blocking for sandbox scrapers: still allow them to pass for observation
+                                if not is_sandbox:
                                     continue
-
-                            # VERIFIED OUTBOUND SIGNAL CHECK
-                            if not any(bs in snippet for bs in mandatory_buyer_signals):
+                                else:
+                                    logger.info(f"SANDBOX: Allowing unverified signal from {scraper_name} (NON-BLOCKING)")
+                            
+                            # 🔒 LOCKED CATEGORY DRIFT PREVENTION
+                            snippet_lower = snippet.lower()
+                            has_vehicle_object = any(obj in snippet_lower for obj in VEHICLES_KE["objects"])
+                            if not has_vehicle_object:
+                                logger.info(f"DRIFT: Discarding lead from {scraper_name} - No vehicle object detected in snippet.")
                                 continue
 
                             # ⏱️ TIME WINDOW
@@ -336,9 +392,13 @@ class LiveLeadIngestor:
                                 "product_category": query,
                                 "quantity_requirement": "1",
                                 "intent_score": 0.95 if phone else 0.85,
+                                "intent_strength": 0.95 if phone else 0.85, # Support for apply_confidence
                                 "location_raw": location,
                                 "radius_km": random.randint(1, 50),
                                 "source_platform": r.get('source', 'Web'),
+                                "source": r.get('source', 'unknown'), # Standard source field for confidence
+                                "_scraper_name": r.get("_scraper_name"), # Preserve for metrics
+                                "is_sandbox": is_sandbox, # 🧪 Sandbox tagging
                                 "request_timestamp": datetime.now(timezone.utc) - timedelta(minutes=minutes_ago),
                                 "whatsapp_link": self._generate_whatsapp_link(phone, query),
                                 "source_url": r['link'],
@@ -351,6 +411,9 @@ class LiveLeadIngestor:
                                 "is_recent": is_verified_time and minutes_ago <= 120,
                                 "minutes_ago": minutes_ago
                             }
+                            # Apply source-weighted confidence score
+                            lead_data = apply_confidence(lead_data)
+                            
                             pass_leads.append(lead_data)
                     except Exception as e:
                         logger.error(f"Parallel Scrape Error for {scraper_name}: {str(e)}")
@@ -368,8 +431,11 @@ class LiveLeadIngestor:
                 unique_leads.append(lead)
                 seen_ids.add(lead['id'])
 
-        logger.info(f"FETCH COMPLETE: Found {len(unique_leads)} verified signals.")
-        return unique_leads
+        # 🧠 VERIFIER: Cross-source verification
+        verified_leads = verify_leads(unique_leads)
+
+        logger.info(f"FETCH COMPLETE: Found {len(verified_leads)} verified signals.")
+        return verified_leads
 
     def save_leads_to_db(self, leads: List[Dict[str, Any]]):
         """Save unique leads to database with logging."""
@@ -379,6 +445,11 @@ class LiveLeadIngestor:
         duplicate_count = 0
         
         for lead_data in leads:
+            # 🧪 SAFETY: Never save sandbox leads to production DB
+            if lead_data.get("is_sandbox"):
+                logger.info(f"SANDBOX: Skipping DB save for lead from {lead_data.get('_scraper_name')}")
+                continue
+
             try:
                 # Check for duplicates by source_url (replaces post_link)
                 existing = self.db.query(models.Lead).filter(models.Lead.source_url == lead_data["source_url"]).first()
@@ -387,7 +458,7 @@ class LiveLeadIngestor:
                     continue
                 
                 # Prepare data for Lead model (only keep valid columns)
-                valid_lead_data = {k: v for k, v in lead_data.items() if k not in ["is_recent", "minutes_ago"]}
+                valid_lead_data = {k: v for k, v in lead_data.items() if k not in ["is_recent", "minutes_ago", "_scraper_name"]}
                 
                 new_lead = models.Lead(**valid_lead_data)
                 self.db.add(new_lead)

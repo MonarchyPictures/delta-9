@@ -33,7 +33,7 @@ COPY app/ ./app/
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 # Set environment variables
-ENV ENVIRONMENT=production
+ENV DELTA9_ENV=prod
 ENV PORT=10000
 
 # Expose the port

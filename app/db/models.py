@@ -36,6 +36,7 @@ class Lead(Base):
     
     # NEW: WhatsApp Integration
     whatsapp_link = Column(String)
+    contact_method = Column(String) # NEW: Explicit contact method from scraper
     
     # NEW: Status & Proof of Life (PROD STRICT)
     status = Column(Enum(CRMStatus), default=CRMStatus.NEW)
@@ -76,7 +77,7 @@ class Lead(Base):
             "source_url": self.source_url,
             "buyer_intent_quote": self.buyer_request_snippet, # Step 5: Exact text
             "urgency_level": getattr(self, "urgency_level", "low"), # Ensure it exists
-            "contact_method": self.whatsapp_link or f"DM via {self.source_platform}",
+            "contact_method": self.contact_method or self.whatsapp_link or f"DM via {self.source_platform}",
             "confidence_score": self.confidence_score,
             "contact_source": self.contact_source
         }
@@ -132,3 +133,27 @@ class SellerProduct(Base):
     location = Column(String)
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, server_default=func.now())
+
+class ScraperMetric(Base):
+    __tablename__ = "scraper_metrics"
+    
+    id = Column(Integer, primary_key=True)
+    scraper_name = Column(String, unique=True, index=True)
+    runs = Column(Integer, default=0)
+    leads_found = Column(Integer, default=0)
+    verified_leads = Column(Integer, default=0)
+    failures = Column(Integer, default=0)
+    consecutive_failures = Column(Integer, default=0)
+    last_success = Column(DateTime)
+    history = Column(JSON) # List of last 20 runs
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+class CategoryMetric(Base):
+    __tablename__ = "category_metrics"
+    
+    id = Column(Integer, primary_key=True)
+    category_name = Column(String, unique=True, index=True)
+    total_leads = Column(Integer, default=0)
+    verified_leads = Column(Integer, default=0)
+    verified_rate = Column(Float, default=0.0)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
