@@ -4,7 +4,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import LeadCard from '../components/LeadCard';
 import { EmptyState } from '../components/UXStates';
-import getApiUrl, { getApiKey } from '../config';
+import { 
+  API_URL, 
+  API_KEY, 
+  GOOGLE_CSE_ID, 
+  fetchLeadsMeta 
+} from '../utils/api';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -13,8 +18,19 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [warningMessage, setWarningMessage] = useState('');
   
   const searchControllerRef = useRef(null);
+  useEffect(() => {
+    console.log("API URL:", API_URL);
+    console.log("API KEY:", API_KEY);
+  }, []);
+  useEffect(() => {
+    fetchLeadsMeta().then(({ leads, warning }) => {
+      setLeads(leads);
+      setWarningMessage(warning || "");
+    });
+  }, []);
 
   const fetchLeads = async (searchQuery, isPolling = false) => {
     // If a request is already in progress:
@@ -43,8 +59,8 @@ const Dashboard = () => {
     }, 100000);
 
     try {
-      const apiUrl = getApiUrl();
-      const apiKey = getApiKey();
+      const apiUrl = API_URL;
+      const apiKey = API_KEY;
       
       if (!isPolling) {
         setLeads([]);
@@ -73,6 +89,7 @@ const Dashboard = () => {
         }
 
         const searchData = await searchRes.json();
+        if (searchData.warning) setWarningMessage(searchData.warning);
         if (searchData.results && searchData.results.length > 0) {
           setLeads(searchData.results);
           setLoading(false);
@@ -103,6 +120,7 @@ const Dashboard = () => {
 
       if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
       const data = await res.json();
+      if (data.warning) setWarningMessage(data.warning);
       // Handle both { leads: [] } and [] formats
       if (data && data.leads) {
         setLeads(data.leads);
@@ -125,8 +143,8 @@ const Dashboard = () => {
 
   const handleStatusChange = async (leadId, newStatus) => {
     try {
-      const apiUrl = getApiUrl();
-      const apiKey = getApiKey();
+      const apiUrl = API_URL;
+      const apiKey = API_KEY;
       const res = await fetch(`${apiUrl}/leads/${leadId}/status?status=${newStatus}`, {
         method: 'PATCH',
         headers: {
@@ -148,7 +166,7 @@ const Dashboard = () => {
   // Google CSE script effect
   useEffect(() => {
     const script = document.createElement('script');
-    script.src = "https://cse.google.com/cse.js?cx=b19c2ccb43df84d2e";
+    script.src = `https://cse.google.com/cse.js?cx=${GOOGLE_CSE_ID}`;
     script.async = true;
     document.body.appendChild(script);
     return () => {
@@ -174,6 +192,11 @@ const Dashboard = () => {
               DELTA<span className="text-blue-600">9</span>
             </h1>
             <p className="text-white/40 text-xs font-black uppercase tracking-[0.4em]">Autonomous Market Intelligence // Kenya</p>
+          </div>
+        )}
+        {warningMessage && !hasSearched && (
+          <div className="mx-4 mb-4 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 p-4">
+            <p className="text-yellow-500 text-xs font-black uppercase tracking-widest">{warningMessage}</p>
           </div>
         )}
 
@@ -224,6 +247,11 @@ const Dashboard = () => {
                   {leads.length} LIVE SIGNALS
                 </div>
               </div>
+              {warningMessage && (
+                <div className="mx-4 mb-4 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 p-4">
+                  <p className="text-yellow-500 text-xs font-black uppercase tracking-widest">{warningMessage}</p>
+                </div>
+              )}
               
               <div className="grid grid-cols-1 gap-4">
                 {errorMessage ? (

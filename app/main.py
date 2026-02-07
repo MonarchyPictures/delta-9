@@ -118,6 +118,7 @@ logger.info(f"--- Database URL present: {bool(os.getenv('DATABASE_URL'))} ---")
 # Secure routes and use environment variables for keys/DB
 API_KEY = os.getenv("API_KEY", "d9_prod_secret_key_2024") 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip() or "sqlite:///./intent_radar.db"
+PIPELINE_MODE = os.getenv("PIPELINE_MODE", "strict").strip().lower()
 
 # Production CORS enforcement
 origins = [
@@ -137,9 +138,11 @@ app.add_middleware(
 )
 
 # API Key Middleware
-def verify_api_key(x_api_key: str = Header(None)):
-    if x_api_key != API_KEY:
-        raise HTTPException(status_code=403, detail="Unauthorized access to market intelligence")
+def verify_api_key(request: Request, x_api_key: str = Header(None)):
+    if request.method == "OPTIONS":
+        return
+    if not x_api_key or x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
     return x_api_key
 
 @app.get("/")
@@ -166,6 +169,7 @@ def read_root():
 # 2. UPDATE BACKEND TO ENFORCE KENYA FILTER
 @app.get("/leads", dependencies=[Depends(verify_api_key)])
 def get_leads(
+    request: Request,
     location: Optional[str] = "Nairobi",
     query: Optional[str] = None,
     radius: Optional[float] = None,
@@ -231,12 +235,17 @@ def get_leads(
                 "suggestion": "Widening time window ONLY (not intent rules)",
                 "status": "zero_results"
             }
-            
-        return {
+        
+        bypass_strict = request.headers.get("X-Admin") == "true"
+        active_bootstrap = PIPELINE_MODE == "bootstrap" or bypass_strict
+        resp = {
             "leads": results,
             "message": f"Showing leads from last {current_window_label}" if current_window_label != target_range else None,
             "window": current_window_label
         }
+        if active_bootstrap:
+            resp["warning"] = "Low-confidence signals shown"
+        return resp
     except Exception as e:
         logger.error(f"--- Error fetching leads: {str(e)} ---")
         raise HTTPException(status_code=500, detail=str(e))
@@ -245,6 +254,7 @@ def get_leads(
 async def search_leads(request: Request, db: Session = Depends(get_db)):
     """Dashboard search: Multi-Pass discovery with verified outbound signals."""
     try:
+        print("🔥 PIPELINE MODE =", PIPELINE_MODE)
         data = await request.json()
         query = data.get("query")
         location = data.get("location", "Kenya")
@@ -270,6 +280,11 @@ async def search_leads(request: Request, db: Session = Depends(get_db)):
                 time_window_hours=target_hours
             )
             
+            bypass_strict = request.headers.get("X-Admin") == "true"
+            active_bootstrap = PIPELINE_MODE == "bootstrap" or bypass_strict
+            confidence_threshold = 0.3 if active_bootstrap else 0.8
+            if live_leads:
+                live_leads = [l for l in live_leads if float(l.get("intent_score", 0) or 0) >= confidence_threshold]
             # Determine which window actually returned data
             current_range = time_range
             if live_leads:
@@ -283,6 +298,8 @@ async def search_leads(request: Request, db: Session = Depends(get_db)):
                 ingestor.save_leads_to_db(live_leads)
             
             if not live_leads:
+                if not active_bootstrap:
+                    print("🔥 STRICT CHECK HIT")
                 return {
                     "results": [], 
                     "message": f"No buyer intent detected for '{query}' in {location} (last {current_range}). PROD_STRICT: Only independently verified outbound signals permitted.",
@@ -317,12 +334,15 @@ async def search_leads(request: Request, db: Session = Depends(get_db)):
             # Sort: Phone first, then most recent
             formatted_leads.sort(key=lambda x: (0 if x["phone"] else 1, x["minutes_ago"]))
 
-            return {
+            resp = {
                 "results": formatted_leads,
                 "message": f"Showing closest valid buyer signals (last {current_range})" if current_range != time_range else None,
                 "window": current_range,
                 "status": "success"
             }
+            if active_bootstrap:
+                resp["warning"] = "Low-confidence signals shown"
+            return resp
         except Exception as e:
             logger.error(f"CRITICAL INGESTION ERROR: {str(e)}")
             # Even on error, return a structured 200 OK for the frontend to handle gracefully

@@ -13,8 +13,8 @@ export const getApiUrl = () => {
             throw new Error(errorMsg);
         }
         // Fallback for local development only if not in PROD mode
-        // Using relative path to leverage Vite proxy
-        return "/api"; 
+        // Explicit backend URL
+        return "http://localhost:8000"; 
     }
     return API_URL;
 };
