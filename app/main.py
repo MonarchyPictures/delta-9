@@ -23,6 +23,10 @@ from .routes.scrapers import router as scrapers_router
 from .routes.admin import router as admin_router
 from .routes.pipeline import router as pipeline_router
 
+# Import database initialization helper if needed
+from .db.database import engine
+from .db import models
+
 from fastapi.responses import JSONResponse
 
 # Setup Logging
@@ -67,6 +71,9 @@ app.include_router(search_router)
 app.include_router(scrapers_router)
 app.include_router(admin_router)
 app.include_router(pipeline_router)
+
+# Ensure database tables exist
+models.Base.metadata.create_all(bind=engine)
 
 # Production CORS enforcement
 origins = [
