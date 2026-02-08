@@ -13,6 +13,8 @@ except ImportError:
     util = None
     torch = None
 
+from ..core.category_config import CategoryConfig
+
 class KeywordExpander:
     def __init__(self, model_name='all-MiniLM-L6-v2'):
         self.model = None
@@ -22,12 +24,11 @@ class KeywordExpander:
             except Exception:
                 self.model = None
             
-        # Predefined industry dictionaries
+        # Load active categories from central config
         self.industry_dicts = {
-            "automotive": ["tires", "rims", "engine", "transmission", "brakes", "battery", "windshield"],
-            "commodities": ["sugar", "oil", "rice", "wheat", "copper", "steel", "gold"],
-            "furniture": ["sofa", "couch", "table", "chair", "bed", "desk", "wardrobe"],
-            "electronics": ["laptop", "phone", "monitor", "camera", "gpu", "cpu", "server"]
+            k: v["keywords"] 
+            for k, v in CategoryConfig.CATEGORIES.items() 
+            if v["is_active"]
         }
 
     def expand_keywords(self, seed_keyword, top_k=5):

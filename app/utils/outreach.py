@@ -7,26 +7,38 @@ from datetime import datetime
 class OutreachEngine:
     def __init__(self):
         self.templates = {
-            "urgent": "Hi {name}, I saw you're looking for {product} urgently. I might be able to help you out right away. Are you still searching?",
-            "general": "Hello {name}, regarding your post about needing {product} - I have some options that might fit what you're looking for. Let me know if you're interested!",
-            "bulk": "Hi {name}, I noticed your request for bulk {product}. We specialize in wholesale orders. Would you like to see our pricing list?"
+            "distress": "I saw you’re selling urgently. I have a ready buyer in Nairobi — can we talk now?",
+            "casual": "Your {product} fits a buyer request I’m handling. Is the price flexible?",
+            "urgent_buyer": "Hi {name}, I saw you're looking for {product} urgently. I might be able to help you out right away. Are you still searching?",
+            "general_buyer": "Hello {name}, regarding your post about needing {product} - I have some options that might fit what you're looking for. Let me know if you're interested!"
         }
 
     def generate_message(self, lead_data):
         """Generate a personalized message based on lead attributes."""
         name = lead_data.get("buyer_name", "there")
-        product = lead_data.get("product_category", "the item")
-        intent_score = lead_data.get("intent_score", 0)
+        product = lead_data.get("product_category") or lead_data.get("product") or "the item"
+        intent_score = lead_data.get("intent_score") or lead_data.get("intent_strength", 0)
         
-        # Select template based on intent score and keywords
+        # Determine if it's a seller or buyer (in this system, we focus on buyer intent, 
+        # but the prompt specifically asked for seller templates too)
+        is_distress = "urgent" in lead_data.get("buyer_request_snippet", "").lower() or \
+                      "haraka" in lead_data.get("buyer_request_snippet", "").lower() or \
+                      lead_data.get("urgency_level") == "high"
+
+        # If we detect it's a seller post (though the engine is buyer-focused, 
+        # we'll add logic to handle the user's specific seller template request)
+        if "sell" in lead_data.get("buyer_request_snippet", "").lower() or \
+           "sale" in lead_data.get("buyer_request_snippet", "").lower():
+            if is_distress:
+                return self.templates["distress"]
+            else:
+                return self.templates["casual"].format(product=product)
+
+        # Standard Buyer Templates
         if intent_score > 0.8:
-            template = self.templates["urgent"]
-        elif "bulk" in lead_data.get("buyer_request_snippet", "").lower():
-            template = self.templates["bulk"]
+            return self.templates["urgent_buyer"].format(name=name, product=product)
         else:
-            template = self.templates["general"]
-            
-        return template.format(name=name, product=product)
+            return self.templates["general_buyer"].format(name=name, product=product)
 
     def select_leads_for_outreach(self, db: Session, min_intent=0.7):
         """Select top-tier leads that haven't been contacted yet."""

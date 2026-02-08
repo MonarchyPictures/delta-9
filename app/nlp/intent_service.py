@@ -16,10 +16,21 @@ class BuyingIntentNLP:
             "how much", "budget is", "looking to buy"
         ]
 
-    def extract_entities(self, text):
-        """Extract products, locations, and names."""
-        entities = {"products": [], "locations": [], "names": []}
+    def extract_entities(self, text, category_config=None):
+        """Extract products, locations, names, and prices."""
+        entities = {"products": [], "locations": [], "names": [], "price": None}
         
+        # Price extraction (KES/K/M formats)
+        price_match = re.search(r'\b(kes|ksh|sh|shillings)?\s*(\d{1,3}(?:,\d{3})*|\d+)\s*(k|m|million|milio)?\b', text, re.IGNORECASE)
+        if price_match:
+            try:
+                val = float(price_match.group(2).replace(',', ''))
+                multiplier = price_match.group(3).lower() if price_match.group(3) else ''
+                if multiplier in ['k']: val *= 1000
+                elif multiplier in ['m', 'million', 'milio']: val *= 1000000
+                entities["price"] = val
+            except: pass
+
         if self.nlp:
             try:
                 doc = self.nlp(text)
@@ -87,13 +98,48 @@ class BuyingIntentNLP:
                     if product.lower() not in [p.lower() for p in entities["products"]]:
                         entities["products"].append(product)
         
-        # If no products found, try simple keyword match from common high-intent categories
-        if not entities["products"]:
-            common_products = ["chicken feed", "poultry feed", "car", "phone", "land", "apartment", "house", "furniture", "water", "tank"]
-            for cp in common_products:
-                if cp in text.lower():
-                    entities["products"].append(cp.title())
+        return entities
+
+    def calculate_confidence(self, text, has_phone=False, extracted_price=None, price_bands=None):
+        """Calculate a confidence score (0.0 - 1.0) for a lead signal."""
+        score = 0.5
+        text_lower = text.lower()
+        
+        # 1. Phone presence is the strongest signal (+0.3)
+        if has_phone:
+            score += 0.3
+            
+        # 2. Price alignment with category bands (+0.1 or -0.2)
+        if extracted_price and price_bands:
+            # Check if price falls into any of the bands
+            in_band = False
+            for band_name, (min_p, max_p) in price_bands.items():
+                if min_p <= extracted_price <= max_p:
+                    in_band = True
                     break
+            if in_band: score += 0.1
+            else: score -= 0.2 # Out of band price is suspicious for this category
+            
+        # 2. High-intent keywords (+0.1 each, max 0.2)
+        intent_matches = 0
+        for pattern in self.intent_patterns:
+            if pattern in text_lower:
+                intent_matches += 1
+                score += 0.1
+                if intent_matches >= 2:
+                    break
+                    
+        # 3. Vehicle-specific high-confidence brands (+0.1)
+        vehicle_brands = ["toyota", "nissan", "subaru", "isuzu", "mazda", "honda", "mitsubishi", "prado", "vitz", "v8", "hilux"]
+        if any(brand in text_lower for brand in vehicle_brands):
+            score += 0.1
+            
+        # 4. Urgency signals (+0.1)
+        urgency_keywords = ["urgent", "urgently", "asap", "haraka", "now", "today"]
+        if any(u in text_lower for u in urgency_keywords):
+            score += 0.1
+            
+        return min(1.0, score)
                 
         return entities
 

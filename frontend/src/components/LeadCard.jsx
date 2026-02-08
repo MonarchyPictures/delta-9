@@ -1,6 +1,22 @@
 import React from 'react';
-import { Phone, Bookmark, ExternalLink, MapPin, Clock, Flame, ShieldCheck, Mail, MessageCircle, User, Trash2 } from 'lucide-react';
+import {
+  Phone,
+  Bookmark,
+  ExternalLink,
+  MapPin,
+  Clock,
+  Flame,
+  ShieldCheck,
+  Mail,
+  MessageCircle,
+  User,
+  Trash2,
+  Zap,
+  Globe,
+  Share2
+} from 'lucide-react';
 import { motion } from 'framer-motion';
+import getApiUrl, { getApiKey } from '../config';
 
 const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange }) => {
   const timeAgo = (date) => {
@@ -44,18 +60,37 @@ const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange }) => {
     return phone;
   };
 
+  const handleContact = async (e) => {
+    e.stopPropagation();
+    if (hasWhatsApp) {
+      window.open(whatsappLink, '_blank');
+      onStatusChange && onStatusChange(lead.lead_id, 'contacted');
+      
+      // Explicitly track the contact/tap on the backend
+      try {
+        const apiUrl = getApiUrl();
+        const apiKey = getApiKey();
+        const sessionId = localStorage.getItem('d9_session_id');
+        await fetch(`${apiUrl}/outreach/contact/${lead.lead_id}`, {
+          method: 'POST',
+          headers: { 
+            'X-API-Key': apiKey,
+            'X-Session-ID': sessionId
+          }
+        });
+      } catch (err) {
+        console.error("Failed to track contact:", err);
+      }
+    } else if (lead.source_url) {
+      window.open(lead.source_url, '_blank');
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      onClick={() => {
-        if (hasWhatsApp) {
-          window.open(whatsappLink, '_blank');
-          onStatusChange && onStatusChange(lead.lead_id, 'contacted');
-        } else if (lead.source_url) {
-          window.open(lead.source_url, '_blank');
-        }
-      }}
+      onClick={handleContact}
       className="bg-[#0A0A0A] border border-white/5 rounded-2xl overflow-hidden hover:border-blue-500/50 transition-all group cursor-pointer relative"
     >
       <div className="p-5">
@@ -75,6 +110,12 @@ const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange }) => {
               <option value="converted" className="bg-neutral-900">CONVERTED</option>
               <option value="dead" className="bg-neutral-900">DEAD</option>
             </select>
+            {lead.buyer_match_score > 0.4 && (
+              <span className="px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest border border-blue-500/30 bg-blue-500/10 text-blue-500 flex items-center gap-1">
+                <Zap size={10} fill="currentColor" className="text-blue-500" />
+                {Math.round(lead.buyer_match_score * 100)}% MATCH
+              </span>
+            )}
             {lead.intent_strength >= 0.85 && (
               <span className="px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest border border-red-500/30 bg-red-500/10 text-red-500 flex items-center gap-1">
                 <Flame size={10} className="animate-pulse" />
@@ -159,6 +200,20 @@ const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange }) => {
             </button>
           )}
         </div>
+
+        {/* Suggested Outreach Section */}
+        {lead.outreach_suggestion && (
+          <div className="mb-6 p-4 rounded-xl bg-blue-500/5 border border-blue-500/10 relative overflow-hidden group/suggestion">
+            <div className="absolute top-0 left-0 w-1 h-full bg-blue-500/20" />
+            <div className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+              <Zap size={10} fill="currentColor" />
+              Suggested Outreach
+            </div>
+            <p className="text-white/80 text-xs italic font-medium leading-relaxed">
+              "{lead.outreach_suggestion}"
+            </p>
+          </div>
+        )}
 
         {/* Primary Action - TAP */}
         {hasWhatsApp ? (

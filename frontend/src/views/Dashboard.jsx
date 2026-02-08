@@ -3,6 +3,8 @@ import { Search, Activity, Target } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import LeadCard from '../components/LeadCard';
+import SuccessTicker from '../components/SuccessTicker';
+import MoneyMetrics from '../components/MoneyMetrics';
 import { EmptyState } from '../components/UXStates';
 import { 
   API_URL, 
@@ -13,6 +15,7 @@ import {
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  const ACTIVE_CATEGORY = "vehicles";
   const [query, setQuery] = useState('');
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -33,6 +36,13 @@ const Dashboard = () => {
   }, []);
 
   const fetchLeads = async (searchQuery, isPolling = false) => {
+    // Get or create session ID
+    let sessionId = localStorage.getItem('d9_session_id');
+    if (!sessionId) {
+      sessionId = `sess_${Math.random().toString(36).substring(2, 15)}`;
+      localStorage.setItem('d9_session_id', sessionId);
+    }
+
     // If a request is already in progress:
     if (searchControllerRef.current) {
       if (isPolling) {
@@ -72,7 +82,8 @@ const Dashboard = () => {
           signal: controller.signal,
           headers: { 
             'Content-Type': 'application/json',
-            'X-API-Key': apiKey
+            'X-API-Key': apiKey,
+            'X-Session-ID': sessionId
           },
           body: JSON.stringify({ 
             query: searchQuery, 
@@ -113,7 +124,8 @@ const Dashboard = () => {
       const res = await fetch(`${apiUrl}/leads?query=${encodeURIComponent(searchQuery)}&limit=10`, {
         signal: controller.signal,
         headers: {
-          'X-API-Key': apiKey
+          'X-API-Key': apiKey,
+          'X-Session-ID': sessionId
         },
         cache: 'no-store' // ENFORCED: No cached data
       });
@@ -175,23 +187,28 @@ const Dashboard = () => {
   }, []);
 
   const trendingSearches = [
-    { term: 'water tank', label: 'Water Tanks' },
-    { term: 'construction materials', label: 'Construction' },
-    { term: 'solar panels', label: 'Solar' },
-    { term: 'tires', label: 'Tires' },
-    { term: 'electronics', label: 'Electronics' },
-    { term: 'rims', label: 'Rims' }
+    { term: 'Toyota', label: 'Toyota' },
+    { term: 'Nissan', label: 'Nissan' },
+    { term: 'Subaru', label: 'Subaru' },
+    { term: 'Isuzu', label: 'Isuzu' },
+    { term: 'Prado', label: 'Prado' },
+    { term: 'Vitz', label: 'Vitz' },
+    { term: 'Mitsubishi', label: 'Mitsubishi' },
+    { term: 'Mazda', label: 'Mazda' }
   ];
 
   return (
     <div className={`flex-1 flex flex-col ${!hasSearched ? 'justify-center' : 'pt-12'} bg-black overflow-hidden`}>
       <div className="w-full max-w-4xl mx-auto px-4 mb-8">
+        <MoneyMetrics />
         {!hasSearched && (
           <div className="text-center mb-12">
-            <h1 className="text-6xl font-black text-white tracking-tighter italic mb-4">
-              DELTA<span className="text-blue-600">9</span>
+            <h1 className="text-5xl font-black text-white tracking-tighter italic mb-4 uppercase">
+              Live Vehicle <span className="text-blue-600">Buyers & Sellers</span> in Kenya
             </h1>
-            <p className="text-white/40 text-xs font-black uppercase tracking-[0.4em]">Autonomous Market Intelligence // Kenya</p>
+            <p className="text-white/40 text-[10px] font-black uppercase tracking-[0.5em]">
+              Verified vehicle demand updated in real time
+            </p>
           </div>
         )}
         {warningMessage && !hasSearched && (
@@ -207,9 +224,12 @@ const Dashboard = () => {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleSearch}
-            placeholder="READ: Search Nairobi buyer intent (e.g. 'tires')..."
-            className="w-full bg-white/5 border border-white/10 text-white text-xl rounded-3xl pl-16 p-6 shadow-2xl outline-none font-bold placeholder:text-white/20 italic focus:border-blue-500/50 focus:bg-white/10 transition-all"
+            placeholder="ENTER VEHICLE MAKE OR MODEL (e.g. 'Toyota Land Cruiser')..."
+            className="w-full bg-white/5 border border-white/10 text-white text-xl rounded-3xl pl-16 p-6 shadow-2xl outline-none font-black placeholder:text-white/10 italic focus:border-blue-500/50 focus:bg-white/10 transition-all uppercase tracking-tight"
           />
+          <div className="absolute right-6 top-1/2 -translate-y-1/2 flex items-center gap-2">
+            <span className="hidden md:block text-[8px] font-black text-white/10 uppercase tracking-widest border border-white/5 px-2 py-1 rounded">Strict Mode</span>
+          </div>
         </div>
 
         {/* Google CSE Search Box */}
@@ -217,7 +237,7 @@ const Dashboard = () => {
 
         {!hasSearched && (
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <span className="text-[10px] font-black text-white/20 uppercase tracking-widest mr-2">Trending in Kenya:</span>
+            <span className="text-[10px] font-black text-white/20 uppercase tracking-widest mr-2">Trending Vehicles:</span>
             {trendingSearches.map((item) => (
               <button
                 key={item.term}
@@ -225,7 +245,7 @@ const Dashboard = () => {
                   setQuery(item.term);
                   fetchLeads(item.term);
                 }}
-                className="px-4 py-2 rounded-full bg-white/5 border border-white/10 text-white/60 text-xs font-bold hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all uppercase tracking-wider"
+                className="px-4 py-2 rounded-full bg-white/5 border border-white/10 text-white/40 text-[10px] font-black hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all uppercase tracking-wider"
               >
                 {item.label}
               </button>

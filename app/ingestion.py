@@ -7,8 +7,7 @@ import requests
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
-from .scrapers.base_scraper import BaseScraper
-from .scrapers.facebook_marketplace import FacebookMarketplaceScraper
+from .scrapers.base_scraper import BaseScraper, GoogleScraper, FacebookMarketplaceScraper, DuckDuckGoScraper, SerpApiScraper
 from .scrapers.classifieds import ClassifiedsScraper
 from .scrapers.twitter import TwitterScraper
 from .scrapers.google_maps import GoogleMapsScraper
@@ -25,6 +24,7 @@ from .scrapers.selector import decide_scrapers
 from .scrapers.metrics import record_run, SCRAPER_METRICS
 from .scrapers.supervisor import check_scraper_health, reset_consecutive_failures
 from .scrapers.verifier import is_verified_signal, verify_leads
+from .core.category_config import CategoryConfig
 
 # ALL possible scrapers available in the system
 ALL_SCRAPERS = [ 
@@ -51,10 +51,17 @@ logging.basicConfig(
 logger = logging.getLogger("LeadIngestion")
 
 class LiveLeadIngestor:
-    def __init__(self, db_session: Session):
+    def __init__(self, db_session: Session, category: str = "vehicles"):
         self.db = db_session
-        self.categories = ["water tank", "construction materials", "electronics", "tires", "solar panels"]
-        self.locations = ["Nairobi", "Mombasa", "Kisumu", "Nakuru", "Eldoret"]
+        self.category_name = category
+        self.config = CategoryConfig.get_config(category)
+        if not self.config:
+            raise ValueError(f"Invalid category: {category}")
+        
+        self.categories = self.config["search_terms"]
+        self.locations = self.config["locations"]
+        self.price_bands = self.config.get("price_bands", {})
+        
         # Enforce production check immediately if initialized for live fetching
         if not PROD_STRICT:
             logger.warning("--- WARNING: Delta9 running in DEVELOPMENT mode. Auto-downgrading to bootstrap. ---")
@@ -295,6 +302,16 @@ class LiveLeadIngestor:
         all_leads = []
         from concurrent.futures import ThreadPoolExecutor, as_completed
         
+<<<<<<< HEAD
+=======
+        # Prioritize SerpApi, then others
+        from ..scraper import LeadScraper
+        ls = LeadScraper(category_keywords=self.config.get("keywords"))
+        
+        # Note: We still use specialized scrapers but they should eventually be unified
+        scrapers = [SerpApiScraper(), DuckDuckGoScraper(), GoogleScraper(), FacebookMarketplaceScraper()]
+        
+>>>>>>> 29fc54e (feat: vehicle-only mode, success metrics, and buyer-match scoring engine.)
         for pass_idx, pass_queries in enumerate(discovery_passes):
             logger.info(f"PASS {pass_idx + 1}/{len(discovery_passes)}: Starting parallel discovery...")
             pass_leads = []
@@ -384,6 +401,22 @@ class LiveLeadIngestor:
                             buyer_name = self._extract_name(r.get('text', ''), r.get('source', 'Web'))
                             urgency = self._parse_urgency(snippet)
                             
+                            # Use new intent-aware scoring for high confidence
+                            from .nlp.intent_service import BuyingIntentNLP
+                            nlp = BuyingIntentNLP()
+                            
+                            # Extract entities including price
+                            entities = nlp.extract_entities(snippet)
+                            extracted_price = entities.get("price")
+                            
+                            # Calculate confidence with price bands
+                            confidence = nlp.calculate_confidence(
+                                snippet, 
+                                has_phone=bool(phone),
+                                extracted_price=extracted_price,
+                                price_bands=self.price_bands
+                            )
+                            
                             lead_id = str(uuid.uuid5(uuid.NAMESPACE_URL, r['link']))
                             lead_data = {
                                 "id": lead_id,
@@ -391,8 +424,12 @@ class LiveLeadIngestor:
                                 "contact_phone": phone,
                                 "product_category": query,
                                 "quantity_requirement": "1",
+<<<<<<< HEAD
                                 "intent_score": 0.95 if phone else 0.85,
                                 "intent_strength": 0.95 if phone else 0.85, # Support for apply_confidence
+=======
+                                "intent_score": confidence,
+>>>>>>> 29fc54e (feat: vehicle-only mode, success metrics, and buyer-match scoring engine.)
                                 "location_raw": location,
                                 "radius_km": random.randint(1, 50),
                                 "source_platform": r.get('source', 'Web'),
@@ -462,6 +499,19 @@ class LiveLeadIngestor:
                 
                 new_lead = models.Lead(**valid_lead_data)
                 self.db.add(new_lead)
+                
+                # Track discovery event for Success Definition
+                new_log = models.ActivityLog(
+                    event_type="LEAD_DISCOVERED",
+                    lead_id=lead_data["id"],
+                    metadata={
+                        "product": lead_data.get("product_category"),
+                        "location": lead_data.get("location_raw"),
+                        "source": lead_data.get("source_platform")
+                    }
+                )
+                self.db.add(new_log)
+                
                 new_count += 1
                 logger.info(f"INSERT: New lead saved from {lead_data['source_platform']} - {lead_data['source_url']}")
             except Exception as e:

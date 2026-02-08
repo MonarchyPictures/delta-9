@@ -11,7 +11,12 @@ from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
 
 class LeadScraper:
-    def __init__(self):
+    def __init__(self, category_keywords=None):
+        self.category_keywords = category_keywords or [
+            "car", "vehicle", "toyota", "nissan", "subaru", "isuzu", "mazda", "honda", "mitsubishi",
+            "prado", "vitz", "land cruiser", "hilux", "demio", "note", "forester", "truck", "pickup",
+            "van", "bus", "spare parts", "engine", "gearbox", "tyre", "rim", "brakes"
+        ]
         self.user_agents = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -69,7 +74,12 @@ class LeadScraper:
                             if ddg_results:
                                 for r in ddg_results:
                                     href = r['href'].lower()
+                                    title_body = f"{r['title']} {r['body']}".lower()
                                     
+                                    # PART B: VEHICLES LAUNCH MODE - Content Filtering
+                                    if not any(kw in title_body for kw in self.category_keywords):
+                                        continue
+
                                     # Filtering
                                     blacklist = ["amazon.com", "ebay.com", "alibaba.com", "jumia.co.ke", "/login", "/signup", "pigiame.co.ke", "jiji.co.ke"]
                                     if any(d in href for d in blacklist): continue

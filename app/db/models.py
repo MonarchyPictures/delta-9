@@ -55,6 +55,7 @@ class Lead(Base):
     buyer_request_snippet = Column(String)
     urgency_level = Column(String, default="low") # NEW: High/Medium/Low
     confidence_score = Column(Float, default=0.0)
+    price = Column(Float, nullable=True) # Extracted price if available
     is_saved = Column(Integer, default=0)
     is_verified_signal = Column(Integer, default=1) # PROD_STRICT: Signal verification flag
     notes = Column(String)
@@ -78,6 +79,7 @@ class Lead(Base):
             "buyer_intent_quote": self.buyer_request_snippet, # Step 5: Exact text
             "urgency_level": getattr(self, "urgency_level", "low"), # Ensure it exists
             "contact_method": self.contact_method or self.whatsapp_link or f"DM via {self.source_platform}",
+            "price": self.price,
             "confidence_score": self.confidence_score,
             "contact_source": self.contact_source
         }
@@ -89,6 +91,16 @@ class SearchPattern(Base):
     keyword = Column(String, unique=True)
     category = Column(String)
     is_active = Column(Integer, default=1)
+
+class ActivityLog(Base):
+    __tablename__ = "activity_logs"
+    
+    id = Column(Integer, primary_key=True)
+    event_type = Column(String, index=True) # WHATSAPP_TAP, LEAD_DISCOVERED, SEARCH_PERFORMED
+    lead_id = Column(String, ForeignKey("leads.id"), nullable=True)
+    session_id = Column(String, index=True, nullable=True) # To group user behavior
+    timestamp = Column(DateTime, server_default=func.now(), index=True)
+    extra_metadata = Column(JSON, nullable=True) # For additional info like product name, etc.
 
 class Agent(Base):
     __tablename__ = "agents"
