@@ -1,27 +1,15 @@
-services:
-  # Consolidated Web Service (FastAPI + React)
-  - type: web
-    name: delta9-platform
-    env: docker
-    region: ohio
-    plan: free # Note: torch/transformers might require a larger plan if they use too much RAM
-    envVars:
-      - key: ENVIRONMENT
-        value: production
-      - key: API_KEY
-        value: d9_prod_secret_key_2024
-      - key: DATABASE_URL
-        fromDatabase:
-          name: delta9-db
-          property: connectionString
-      - key: SERPAPI_API_KEY
-        sync: false # User will need to add this manually in Render Dashboard
-      - key: VITE_API_URL # Optional since it defaults to /api in config.js
-        value: /api
-      - key: VITE_API_KEY
-        value: d9_prod_secret_key_2024
-
-databases:
-  - name: delta9-db
-    plan: free
-    region: ohio
+services: 
+  - type: web 
+    name: delta9-vehicles 
+    env: python 
+    buildCommand: pip install -r requirements.txt 
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000 
+    envVars: 
+      - key: PIPELINE_MODE 
+        value: bootstrap 
+      - key: PIPELINE_CATEGORY 
+        value: vehicles 
+      - key: FB_SCRAPER_ENABLED 
+        value: true 
+      - key: STRICT_MODE 
+        value: false 

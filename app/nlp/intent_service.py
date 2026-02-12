@@ -1,20 +1,15 @@
 import re
 from datetime import datetime, timedelta
 
+from ..intelligence.intent import BUYER_PHRASES
+
 class BuyingIntentNLP:
     def __init__(self):
         # Disable spacy on Python 3.12+ due to Pydantic V1 incompatibility
         self.nlp = None
         # self.nlp = spacy.load("en_core_web_sm")
         
-        self.intent_patterns = [
-            "buying", "need", "looking for", "want to purchase", 
-            "urgent", "asap", "price for", "bulk order",
-            "ready to buy", "wtb", "iso", "searching for",
-            "any recommendations for", "who sells", "need urgently",
-            "where can i get", "dm me", "inbox me", "price of",
-            "how much", "budget is", "looking to buy"
-        ]
+        self.intent_patterns = BUYER_PHRASES
 
     def extract_entities(self, text, category_config=None):
         """Extract products, locations, names, and prices."""

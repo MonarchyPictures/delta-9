@@ -9,17 +9,46 @@ from .matcher import buyer_match_score
 
 @dataclass
 class BuyerProfile:
-    vehicle_type: Optional[str] = None
+    interest_type: Optional[str] = None
     budget_min: Optional[int] = None
     budget_max: Optional[int] = None
     location: Optional[str] = None
     urgency: float = 0.5  # 0–1
 
-    def calculate_match_score(self, lead_data: Dict[str, Any]) -> float:
-        """
-        Calculates how well a lead matches this buyer profile using the central matcher.
-        """
-        return buyer_match_score(lead_data, self)
+    def calculate_match_score(self, lead: dict) -> float:
+        """Helper to calculate match score for a lead."""
+        return buyer_match_score(lead, self)
+
+def _safe_int(val):
+    try:
+        return int(val) if val else None
+    except (ValueError, TypeError):
+        return None
+
+def _recent_activity_score(request):
+    """
+    Calculates a quick urgency score based on session activity or headers.
+    Implicit intent detection.
+    """
+    # Quick check for high-velocity headers if frontend provides them
+    if request.headers.get("x-high-urgency") == "true":
+        return 0.9
+    
+    # Fallback to a default or session-based logic (could be expanded)
+    return 0.5
+
+def infer_buyer_profile(request): 
+    """
+    Infer buyer profile automatically (no forms).
+    Buyer intent is implicit, not annoying.
+    """
+    return BuyerProfile( 
+        interest_type=request.headers.get("x-interest-type"), 
+        budget_min=_safe_int(request.headers.get("x-budget-min")), 
+        budget_max=_safe_int(request.headers.get("x-budget-max")), 
+        location=request.headers.get("x-location"), 
+        urgency=_recent_activity_score(request) 
+    ) 
 
 class BuyerBehaviorEngine:
     """Infers BuyerProfile from user activity logs."""
@@ -31,7 +60,7 @@ class BuyerBehaviorEngine:
         if not activity_logs:
             return profile
             
-        vehicle_counts = {}
+        interest_counts = {}
         locations = {}
         total_urgency = 0
         urgency_count = 0
@@ -61,11 +90,11 @@ class BuyerBehaviorEngine:
             event_base_weight = EVENT_WEIGHTS.get(log.event_type, 0.1)
             effective_weight = event_base_weight * time_weight
             
-            # 1. Infer vehicle type from searches and taps
+            # 1. Infer interest type from searches and taps
             product = meta.get("product") or meta.get("query")
             if product:
                 product_key = product.lower()
-                vehicle_counts[product_key] = vehicle_counts.get(product_key, 0) + effective_weight
+                interest_counts[product_key] = interest_counts.get(product_key, 0) + effective_weight
             
             # 2. Infer location
             loc = meta.get("location")
@@ -83,8 +112,8 @@ class BuyerBehaviorEngine:
                 budgets.append((price, effective_weight))
 
         # Finalize profile attributes
-        if vehicle_counts:
-            profile.vehicle_type = max(vehicle_counts, key=vehicle_counts.get)
+        if interest_counts:
+            profile.interest_type = max(interest_counts, key=interest_counts.get)
             
         if locations:
             profile.location = max(locations, key=locations.get)

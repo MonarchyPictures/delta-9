@@ -1,5 +1,7 @@
 import logging
-from .base_scraper import BaseScraper
+import re
+from datetime import datetime, timezone
+from .base_scraper import BaseScraper, ScraperSignal
 from ..utils.playwright_helpers import get_page_content
 from bs4 import BeautifulSoup
 import urllib.parse
@@ -7,7 +9,9 @@ import urllib.parse
 logger = logging.getLogger(__name__)
 
 class InstagramScraper(BaseScraper):
-    def scrape(self, query, time_window_hours=2):
+    source = "instagram"
+
+    def scrape(self, query: str, time_window_hours: int = 2):
         logger.info(f"INSTAGRAM: Scraping for {query} in Kenya")
         
         # Instagram search usually works best via hashtags or specific keywords
@@ -36,15 +40,17 @@ class InstagramScraper(BaseScraper):
                 img = item.find('img')
                 text = img.get('alt', '') if img else f"Instagram post about {query}"
                 
-                results.append({
-                    "intent_text": text,
-                    "link": link,
-                    "source": "Instagram",
-                    "product": query,
-                    "location": "Kenya",
-                    "contact_method": f"Instagram DM: {link}",
-                    "confidence_score": 0.7
-                })
+                # 🎯 DUMB SCRAPER: Standardized Signal Output
+                signal = ScraperSignal(
+                    source=self.source,
+                    text=text,
+                    author="Instagram User",
+                    contact=self.extract_contact_info(f"{text} {link}"),
+                    location="Kenya",
+                    url=link,
+                    timestamp=datetime.now(timezone.utc).isoformat()
+                )
+                results.append(signal.model_dump())
             except Exception as e:
                 logger.error(f"Error parsing Instagram item: {e}")
                 

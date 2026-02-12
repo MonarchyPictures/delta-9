@@ -1,29 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import getApiUrl, { getApiKey } from '../config';
+import { Settings as SettingsIcon, Shield, Zap, Globe, AlertCircle, CheckCircle2 } from 'lucide-react';
 
-const Settings = ({ notificationsEnabled, setNotificationsEnabled, soundEnabled, setSoundEnabled }) => {
+const Settings = () => {
   const [scrapers, setScrapers] = useState({});
-  const [loadingScrapers, setLoadingScrapers] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [updating, setUpdating] = useState(null);
 
   const fetchScrapers = async () => {
     try {
       const apiUrl = getApiUrl();
       const apiKey = getApiKey();
-      const res = await fetch(`${apiUrl}/scrapers/status`, {
-        headers: {
-          'X-API-Key': apiKey,
-          'x-admin': 'true'
-        }
+      const res = await fetch(`${apiUrl}/scrapers`, {
+        headers: { 'X-API-Key': apiKey }
       });
       if (res.ok) {
         const data = await res.json();
         setScrapers(data);
+      } else {
+        setError("Failed to fetch scrapers");
       }
     } catch (err) {
-      console.error("Failed to fetch scrapers:", err);
+      setError("Connection error");
     } finally {
-      setLoadingScrapers(false);
+      setLoading(false);
     }
   };
 
@@ -31,251 +32,144 @@ const Settings = ({ notificationsEnabled, setNotificationsEnabled, soundEnabled,
     fetchScrapers();
   }, []);
 
-  const toggleScraper = async (name, currentStatus) => {
+  const toggleScraper = async (name, currentState) => {
+    setUpdating(name);
     try {
       const apiUrl = getApiUrl();
       const apiKey = getApiKey();
-      const endpoint = currentStatus ? 'disable' : 'enable';
-      const res = await fetch(`${apiUrl}/scrapers/${name}/${endpoint}`, {
+      const newState = !currentState;
+      
+      const res = await fetch(`${apiUrl}/scrapers/toggle?name=${name}&enabled=${newState}`, {
         method: 'POST',
-        headers: {
+        headers: { 
           'X-API-Key': apiKey,
-          'x-admin': 'true'
+          'x-role': 'user'
         }
       });
+
       if (res.ok) {
-        fetchScrapers();
+        setScrapers(prev => ({
+          ...prev,
+          [name]: { ...prev[name], enabled: newState }
+        }));
+      } else {
+        const data = await res.json();
+        alert(data.detail || "Failed to update scraper");
       }
     } catch (err) {
-      console.error(`Failed to ${currentStatus ? 'disable' : 'enable'} scraper:`, err);
+      alert("Network error updating scraper");
+    } finally {
+      setUpdating(null);
     }
   };
 
-  const toggleMode = async (name, currentMode) => {
-    try {
-      const apiUrl = getApiUrl();
-      const apiKey = getApiKey();
-      const newMode = currentMode === 'production' ? 'sandbox' : 'production';
-      const res = await fetch(`${apiUrl}/scrapers/${name}/mode?mode=${newMode}`, {
-        method: 'POST',
-        headers: {
-          'X-API-Key': apiKey,
-          'x-admin': 'true'
-        }
-      });
-      if (res.ok) {
-        fetchScrapers();
-      }
-    } catch (err) {
-      console.error("Failed to toggle mode:", err);
-    }
-  };
-
-  const promoteScraper = async (name) => {
-    try {
-      const apiUrl = getApiUrl();
-      const apiKey = getApiKey();
-      const res = await fetch(`${apiUrl}/scrapers/${name}/promote`, {
-        method: 'POST',
-        headers: {
-          'X-API-Key': apiKey,
-          'x-admin': 'true'
-        }
-      });
-      if (res.ok) {
-        fetchScrapers();
-      }
-    } catch (err) {
-      console.error("Failed to promote scraper:", err);
-    }
-  };
-
-  const formatTTL = (seconds) => {
-    if (!seconds) return null;
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const calculateSuccessRate = (metrics) => {
-    if (!metrics || !metrics.runs) return '0%';
-    const rate = (metrics.verified / metrics.runs) * 100;
-    return `${rate.toFixed(1)}%`;
-  };
-
-  const updateSettings = async (newSettings) => {
-    try {
-      const apiUrl = getApiUrl();
-      const apiKey = getApiKey();
-      await fetch(`${apiUrl}/settings`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': apiKey
-        },
-        body: JSON.stringify(newSettings)
-      });
-    } catch (err) {
-      console.error("Failed to update settings:", err);
-    }
-  };
-
-  const toggleNotifications = () => {
-    const newValue = !notificationsEnabled;
-    setNotificationsEnabled(newValue);
-    updateSettings({ notifications_enabled: newValue });
-  };
-
-  const toggleSound = () => {
-    const newValue = !soundEnabled;
-    setSoundEnabled(newValue);
-    updateSettings({ sound_enabled: newValue });
-  };
+  if (loading) return (
+    <div className="flex-1 flex items-center justify-center bg-black">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+    </div>
+  );
 
   return (
-    <div className="flex-1 bg-black p-8 text-white overflow-y-auto">
-      <div className="max-w-2xl mx-auto space-y-12">
-        <h1 className="text-4xl font-black italic tracking-tighter">SETTINGS</h1>
-        
-        <div className="space-y-6">
-          <div className="bg-white/5 border border-white/10 rounded-3xl p-6 flex items-center justify-between">
-            <div>
-              <h3 className="font-bold text-lg">Push Notifications</h3>
-              <p className="text-white/40 text-sm italic">Alert me when new leads appear in Nairobi</p>
-            </div>
-            <button 
-              onClick={toggleNotifications}
-              className={`w-14 h-8 rounded-full transition-all ${notificationsEnabled ? 'bg-blue-600' : 'bg-white/10'}`}
-            >
-              <div className={`w-6 h-6 bg-white rounded-full transition-all transform ${notificationsEnabled ? 'translate-x-7' : 'translate-x-1'}`} />
-            </button>
+    <div className="flex-1 overflow-y-auto bg-black p-4 md:p-8">
+      <div className="max-w-4xl mx-auto space-y-8">
+        {/* Header */}
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-blue-600/20 rounded-2xl">
+            <SettingsIcon className="text-blue-500" size={32} />
           </div>
-
-          <div className="bg-white/5 border border-white/10 rounded-3xl p-6 flex items-center justify-between">
-            <div>
-              <h3 className="font-bold text-lg">Alert Sound</h3>
-              <p className="text-white/40 text-sm italic">Play a sound for high-confidence intents</p>
-            </div>
-            <button 
-              onClick={toggleSound}
-              className={`w-14 h-8 rounded-full transition-all ${soundEnabled ? 'bg-blue-600' : 'bg-white/10'}`}
-            >
-              <div className={`w-6 h-6 bg-white rounded-full transition-all transform ${soundEnabled ? 'translate-x-7' : 'translate-x-1'}`} />
-            </button>
+          <div>
+            <h2 className="text-3xl font-black italic tracking-tighter uppercase">Settings</h2>
+            <p className="text-white/40 text-sm font-bold tracking-widest uppercase">System Configuration • Kenya Vehicles</p>
           </div>
         </div>
 
-        <div className="space-y-6 pt-12 border-t border-white/10">
-          <h2 className="text-2xl font-black italic tracking-tight">SCRAPER CONTROL</h2>
-          
-          {loadingScrapers ? (
-            <div className="text-white/20 italic animate-pulse">Loading scraper status...</div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {Object.entries(scrapers).map(([name, data]) => (
-                <div key={name} className="bg-white/5 border border-white/10 rounded-3xl p-6 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-bold text-lg">{name}</h3>
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        {data.core && (
-                          <span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">CORE</span>
-                        )}
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${data.enabled ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                          {data.enabled ? 'ON' : 'OFF'}
+        {error && (
+          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3 text-red-500">
+            <AlertCircle size={20} />
+            <span className="font-bold text-sm uppercase tracking-tight">{error}</span>
+          </div>
+        )}
+
+        {/* Scrapers Section */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Zap className="text-yellow-500" size={20} />
+              <h3 className="text-lg font-black uppercase tracking-widest italic">Signal Scrapers</h3>
+            </div>
+            <span className="text-[10px] font-black bg-white/5 px-3 py-1 rounded-full text-white/40 uppercase tracking-widest">
+              {Object.keys(scrapers).length} Available
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {Object.entries(scrapers).map(([name, data]) => (
+              <div key={name} className={`p-5 rounded-3xl border transition-all duration-300 ${data.enabled ? 'bg-white/5 border-white/10' : 'bg-black border-white/5 opacity-60'}`}>
+                <div className="flex items-start justify-between mb-4">
+                  <div className="space-y-1">
+                    <h4 className="font-black text-sm uppercase tracking-tight flex items-center gap-2">
+                      {name.replace('Scraper', '')}
+                      {data.core && <Shield size={12} className="text-blue-500" title="Core Scraper" />}
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${data.cost === 'free' ? 'bg-green-500/10 text-green-500' : 'bg-yellow-500/10 text-yellow-500'}`}>
+                        {data.cost}
+                      </span>
+                      <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md bg-white/5 text-white/40">
+                        {data.noise} noise
+                      </span>
+                      {data.mode === 'bootstrap' && (
+                        <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-500">
+                          Bootstrap
                         </span>
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${data.mode === 'sandbox' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-purple-500/20 text-purple-400'}`}>
-                          {data.mode?.toUpperCase() || 'PRODUCTION'}
-                        </span>
-                        {data.ttl_remaining > 0 && (
-                          <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider animate-pulse">
-                            TTL: {formatTTL(data.ttl_remaining)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {data.mode === 'sandbox' && (
-                        <button 
-                          onClick={() => promoteScraper(name)}
-                          className="text-[10px] bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-full font-black italic transition-all uppercase tracking-tighter border border-white/10"
-                        >
-                          PROMOTE
-                        </button>
                       )}
-                      <button 
-                        onClick={() => toggleScraper(name, data.enabled)}
-                        className={`w-12 h-6 rounded-full transition-all ${data.enabled ? 'bg-blue-600' : 'bg-white/10'}`}
-                      >
-                        <div className={`w-4 h-4 bg-white rounded-full transition-all transform ${data.enabled ? 'translate-x-7' : 'translate-x-1'}`} />
-                      </button>
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-4 gap-2 pt-2">
-                    <div className="text-center p-2 bg-black/20 rounded-xl">
-                      <div className="text-xs text-white/40 italic">Runs</div>
-                      <div className="font-bold text-sm">{data.metrics?.runs || 0}</div>
-                    </div>
-                    <div className="text-center p-2 bg-black/20 rounded-xl">
-                      <div className="text-xs text-white/40 italic">Verified</div>
-                      <div className="font-bold text-sm text-green-400">{data.metrics?.verified || 0}</div>
-                    </div>
-                    <div className="text-center p-2 bg-black/20 rounded-xl">
-                      <div className="text-xs text-white/40 italic">Success</div>
-                      <div className="font-bold text-sm text-blue-400">{calculateSuccessRate(data.metrics)}</div>
-                    </div>
-                    <div className="text-center p-2 bg-black/20 rounded-xl">
-                      <div className="text-xs text-white/40 italic">Failures</div>
-                      <div className="font-bold text-sm text-red-400/60">{data.metrics?.failures || 0}</div>
-                    </div>
-                  </div>
-
-                  {/* Scraper Health Chart */}
-                  {data.metrics?.history && data.metrics.history.length > 0 && (
-                    <div className="h-24 w-full mt-4 bg-black/20 rounded-2xl p-2 overflow-hidden">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={data.metrics.history}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                          <Tooltip 
-                            contentStyle={{ backgroundColor: '#111', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '10px' }}
-                            itemStyle={{ padding: '0px' }}
-                          />
-                          <Line 
-                            type="monotone" 
-                            dataKey="verified" 
-                            stroke="#4ade80" 
-                            strokeWidth={2} 
-                            dot={false} 
-                            isAnimationActive={false}
-                          />
-                          <Line 
-                            type="monotone" 
-                            dataKey="leads" 
-                            stroke="#3b82f6" 
-                            strokeWidth={1} 
-                            strokeDasharray="3 3"
-                            dot={false} 
-                            isAnimationActive={false}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
                   
-                  {(!data.metrics?.history || data.metrics.history.length === 0) && (
-                    <div className="h-24 w-full mt-4 bg-white/5 rounded-2xl flex items-center justify-center">
-                      <span className="text-[10px] text-white/10 uppercase tracking-widest font-black">No History Data</span>
+                  <button
+                    onClick={() => toggleScraper(name, data.enabled)}
+                    disabled={updating === name || data.core}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${data.enabled ? 'bg-blue-600' : 'bg-white/10'} ${data.core ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${data.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-[10px] text-white/40 font-bold uppercase tracking-widest">
+                    <Globe size={12} />
+                    <span>Categories: {data.categories.join(', ')}</span>
+                  </div>
+                  
+                  {data.metrics && (
+                    <div className="grid grid-cols-3 gap-2 pt-3 border-t border-white/5">
+                      <div className="text-center">
+                        <div className="text-[10px] font-black text-white/20 uppercase tracking-tighter">Leads</div>
+                        <div className="text-xs font-bold">{data.metrics.leads_found || 0}</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-[10px] font-black text-white/20 uppercase tracking-tighter">Success</div>
+                        <div className="text-xs font-bold text-green-500">{data.metrics.success_rate || '0%'}</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-[10px] font-black text-white/20 uppercase tracking-tighter">Speed</div>
+                        <div className="text-xs font-bold">{data.metrics.avg_speed || '0s'}</div>
+                      </div>
                     </div>
                   )}
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+              </div>
+            ))}
+          </div>
+        </section>
 
-        <div className="pt-12 border-t border-white/10">
-          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white/20">Production Version 1.0.0 // Delta9</p>
+        {/* Info Card */}
+        <div className="p-6 bg-blue-600/10 border border-blue-600/20 rounded-3xl flex gap-4">
+          <CheckCircle2 className="text-blue-500 shrink-0" size={24} />
+          <div className="space-y-1">
+            <p className="text-xs font-bold text-blue-200 uppercase tracking-wide">Optimization Tip</p>
+            <p className="text-sm text-white/60">Core scrapers like Google Maps and Classifieds cannot be disabled to ensure minimum signal coverage for the Kenya Vehicles market.</p>
+          </div>
         </div>
       </div>
     </div>

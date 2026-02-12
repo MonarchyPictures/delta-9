@@ -97,7 +97,7 @@ class LeadScraper:
 
                                     all_results.append({
                                         "source": source,
-                                        "link": r['href'],
+                                        "url": r['href'],
                                         "text": f"{r['title']} - {r['body']}",
                                         "category": "General",
                                         "user": "Social Post" if source not in ["Google", "Bing", "DuckDuckGo"] else "Web Result",
@@ -153,7 +153,7 @@ class LeadScraper:
             for r in data.get("organic_results", []):
                 results.append({
                     "source": source,
-                    "link": r.get("link"),
+                    "url": r.get("link"),
                     "text": f"{r.get('title')} - {r.get('snippet')}",
                     "category": "General",
                     "user": "Web Result",
@@ -413,10 +413,10 @@ class LeadScraper:
                         
                         results.append({
                             "source": source,
-                            "link": link,
-                            "text": f"{title} - {snippet}",
+                            "url": link,
+                            "text": text,
                             "category": "General",
-                            "user": "Social Post" if source not in ["Google", "Bing"] else "Web Result",
+                            "user": "Social Post" if source not in ["Google", "Bing", "DuckDuckGo"] else "Web Result",
                             "location": location
                         })
                     except Exception as res_err:

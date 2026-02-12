@@ -1,12 +1,10 @@
 import React from 'react';
-import { LayoutDashboard, ListFilter, Users, Settings } from 'lucide-react';
+import { LayoutDashboard, ListFilter } from 'lucide-react';
 
 const BottomNav = ({ activeTab, onTabChange }) => {
   const tabs = [
     { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
     { id: 'leads', label: 'Leads', icon: ListFilter },
-    { id: 'agents', label: 'Agents', icon: Users },
-    { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
   return (

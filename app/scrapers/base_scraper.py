@@ -2,6 +2,9 @@ import logging
 import random
 import time
 from abc import ABC, abstractmethod 
+from datetime import datetime
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field
 from playwright.sync_api import sync_playwright 
 
 logger = logging.getLogger(__name__)
@@ -12,25 +15,59 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" 
 ] 
 
+class ScraperSignal(BaseModel):
+    """
+    Standard Signal Object returned by all scrapers.
+    Scrapers are 'dumb' and only emit raw data.
+    """
+    source: str
+    text: str
+    author: Optional[str] = None
+    contact: Dict[str, Optional[str]] = Field(default_factory=lambda: {
+        "phone": None,
+        "whatsapp": None,
+        "email": None
+    })
+    location: str
+    url: str
+    timestamp: str  # ISO Format
+
 class BaseScraper(ABC): 
     def __init__(self, user_agent=None): 
         self.user_agent = user_agent or random.choice(USER_AGENTS)
+        from .metrics import SCRAPER_METRICS
+        self.stats = SCRAPER_METRICS.get(self.__class__.__name__, {})
+
+    @property
+    def priority_score(self) -> float:
+        """Dynamic priority score for sorting."""
+        from .metrics import get_scraper_performance_score
+        return get_scraper_performance_score(self.__class__.__name__)
+
+    @property
+    def auto_disabled(self) -> bool:
+        """Check if scraper has been auto-disabled by the performance engine."""
+        from .metrics import SCRAPER_METRICS
+        return SCRAPER_METRICS.get(self.__class__.__name__, {}).get("auto_disabled", False)
 
     @abstractmethod 
-    def scrape(self, query: str, time_window_hours: int): 
-        """Must return list of leads with dicts: 
+    def scrape(self, query: str, time_window_hours: int) -> List[Dict[str, Any]]: 
+        """
+        Must return a list of raw signals matching the ScraperSignal model:
         { 
-            'source': str, 
-            'product': str, 
-            'location': str, 
-            'intent_text': str, 
-            'contact_method': str, 
-            'confidence_score': float 
-        } 
+            "source": str, 
+            "text": str, 
+            "author": str | None, 
+            "contact": {"phone": str|None, "whatsapp": str|None, "email": str|None},
+            "location": str, 
+            "url": str,
+            "timestamp": "ISO"
+        }
         """ 
         pass 
 
     def get_page_content(self, url, wait_selector=None): 
+        print("Navigating to:", url)
         logger.info(f"PLAYWRIGHT: Fetching {url} with hardened stealth")
         try:
             with sync_playwright() as p: 
@@ -50,20 +87,35 @@ class BaseScraper(ABC):
                 ) 
         
                 page = context.new_page() 
-                page.goto(url, timeout=60000) 
+                page.goto(url, timeout=15000) 
         
                 for text in ["Accept", "Accept all", "I agree"]: 
                     try: 
-                        page.click(f"text={text}", timeout=3000) 
+                        page.click(f"text={text}", timeout=2000) 
                         break 
                     except: 
                         pass 
         
+                # 📜 Scroll to Load More Content (Handles lazy-loading)
+                print(f"Scrolling to load content for {url}...")
+                for i in range(2):
+                    page.evaluate("window.scrollBy(0, window.innerHeight)")
+                    page.wait_for_timeout(2000) # wait for content to load
+        
                 if wait_selector: 
                     try:
-                        page.wait_for_selector(wait_selector, timeout=15000) 
+                        # Primary selector 
+                        page.wait_for_selector(wait_selector, timeout=5000) 
                     except Exception as e:
-                        logger.warning(f"PLAYWRIGHT: Wait selector {wait_selector} failed: {e}")
+                        print(f"Primary selector '{wait_selector}' failed, trying fallback...")
+                        try:
+                            # Fallback for dynamic layout
+                            page.wait_for_selector("[role='main'], [role='presentation'], .main-content, #main", timeout=5000)
+                        except Exception as fe:
+                            # If all selectors fail, just log and continue with whatever we have
+                            html_len = len(page.content())
+                            print(f"PLAYWRIGHT: All selectors failed, but got {html_len} chars of HTML")
+                            logger.warning(f"PLAYWRIGHT: Both primary and fallback selectors failed at {url}, HTML len: {html_len}")
         
                 time.sleep(random.uniform(1.5, 3.0)) 
         
@@ -71,5 +123,30 @@ class BaseScraper(ABC):
                 browser.close() 
                 return html
         except Exception as e:
+            print("PLAYWRIGHT ERROR:", str(e))
             logger.error(f"PLAYWRIGHT death at {url}: {str(e)}")
             return ""
+
+    def extract_contact_info(self, text: str) -> Dict[str, Optional[str]]:
+        """
+        Extracts phone numbers and emails from text.
+        """
+        import re
+        contact = {"phone": None, "whatsapp": None, "email": None}
+        
+        # Phone regex as requested: +254... or 07...
+        phone_regex = r'(\+254\d{9}|07\d{8})'
+        phones = re.findall(phone_regex, text)
+        
+        if phones:
+            contact["phone"] = phones[0]
+            # Default whatsapp to phone if found
+            contact["whatsapp"] = f"https://wa.me/{phones[0].replace('+', '').replace(' ', '')}"
+        
+        # Fallback to email if no phone or just extra extraction
+        email_regex = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+        emails = re.findall(email_regex, text)
+        if emails:
+            contact["email"] = emails[0]
+            
+        return contact

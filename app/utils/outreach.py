@@ -3,6 +3,15 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 import json
 from datetime import datetime
+import urllib.parse
+
+def whatsapp_link(phone: str, message: str):
+    """Generates a prefilled WhatsApp link with zero friction."""
+    if not phone:
+        return ""
+    clean = phone.replace("+", "").replace(" ", "").replace("-", "")
+    encoded = urllib.parse.quote(message)
+    return f"https://wa.me/{clean}?text={encoded}"
 
 class OutreachEngine:
     def __init__(self):

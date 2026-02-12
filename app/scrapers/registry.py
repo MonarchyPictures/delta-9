@@ -4,38 +4,55 @@ import time
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 
+from ..config.scrapers import SCRAPER_CONFIG, is_scraper_allowed
+
 logger = logging.getLogger("ScraperRegistry")
 
-# 🔒 STEP 3 — Enable / Disable Scrapers (Vehicles Only)
-# This mapping ensures only authorized, high-signal scrapers are used for the vehicles_ke category.
-CATEGORY_SCRAPER_REGISTRY = {
-    "vehicles_ke": {
-        "enabled": [
-            "FacebookMarketplaceScraper",
-            "GoogleMapsScraper",
-            "ClassifiedsScraper"
-        ],
-        "disabled": [
-            "RedditScraper",
-            "TwitterScraper",
-            "GoogleCSEScraper",
-            "InstagramScraper"
-        ]
-    }
-}
+# 🔒 Enable / Disable Scrapers (Generic)
+# FULLY GENERIC: No category-specific prioritization.
+ENABLED_SCRAPERS = [
+    "FacebookMarketplaceScraper",
+    "GoogleMapsScraper",
+    "ClassifiedsScraper",
+    "TwitterScraper",
+    "RedditScraper",
+    "InstagramScraper",
+    "GoogleCSEScraper",
+    "GoogleScraper",
+    "WhatsAppPublicGroupScraper"
+]
 
-def get_active_scrapers(category_key: str) -> List[str]:
+def get_active_scrapers() -> List[str]:
     """
     🚫 Disabled scrapers never execute
     🚫 No wasted time
     🚫 No noise
     """
-    registry = CATEGORY_SCRAPER_REGISTRY.get(category_key, {})
-    return registry.get("enabled", [])
+    # Cross-reference with GLOBAL SCRAPER_CONFIG
+    # Map SCRAPER_CONFIG keys to Scraper class names
+    mapping = {
+        "facebook": "FacebookMarketplaceScraper",
+        "twitter": "TwitterScraper",
+        "reddit": "RedditScraper",
+        "google_cse": "GoogleCSEScraper"
+    }
+    
+    final_enabled = []
+    for s_name in ENABLED_SCRAPERS:
+        # Find if this scraper has a global toggle
+        config_key = next((k for k, v in mapping.items() if v == s_name), None)
+        if config_key:
+            if is_scraper_allowed(config_key):
+                final_enabled.append(s_name)
+        else:
+            # Scrapers not in mapping pass through if in ENABLED_SCRAPERS
+            final_enabled.append(s_name)
+            
+    return final_enabled
 
 # Safety & Quota Tracking
 QUOTAS = {
-    "GoogleCSEScraper": {"limit": 100, "used": 0, "reset_at": 0},
+    "GoogleCSEScraper": {"limit": 1000, "used": 0, "reset_at": 0},
 }
 
 # Core registry defining the static properties of each scraper
@@ -55,7 +72,7 @@ SCRAPER_REGISTRY = {
         "mode": "production",
         "cost": "free",
         "noise": "low",
-        "categories": ["electronics", "cars", "real estate", "construction materials"],
+        "categories": ["all"],
         "enabled_until": None
     },
     "FacebookMarketplaceScraper": {
@@ -64,51 +81,69 @@ SCRAPER_REGISTRY = {
         "mode": "production",
         "cost": "free",
         "noise": "medium",
-        "categories": ["electronics", "cars", "furniture", "tires"],
+        "categories": ["all"],
         "enabled_until": None
     },
     "TwitterScraper": {
-        "enabled": False,
+        "enabled": True, # Managed by SCRAPER_CONFIG
         "core": False,
         "mode": "production",
         "cost": "free",
         "noise": "high",
-        "categories": ["jobs", "news", "events", "trending"],
-        "enabled_until": None,
-    },
-    "RedditScraper": {
-        "enabled": False,
-        "core": False,
-        "mode": "production",
-        "cost": "free",
-        "noise": "high",
-        "categories": ["reviews", "discussions", "electronics"],
-        "enabled_until": None,
-    },
-    "GoogleCSEScraper": {
-        "enabled": False,
-        "core": False,
-        "mode": "production",
-        "cost": "paid",
-        "noise": "medium",
         "categories": ["all"],
         "enabled_until": None,
     },
-    "InstagramScraper": {
-        "enabled": False,
-        "core": False,
-        "mode": "sandbox",
-        "cost": "free",
-        "noise": "high",
-        "categories": ["lifestyle", "electronics", "fashion"],
-        "enabled_until": None,
-    },
-    "WhatsAppPublicGroupScraper": {
+    "RedditScraper": {
         "enabled": True,
         "core": False,
         "mode": "production",
         "cost": "free",
         "noise": "high",
+        "categories": ["all"],
+        "enabled_until": None
+    },
+    "InstagramScraper": {
+        "enabled": True,
+        "core": False,
+        "mode": "production",
+        "cost": "free",
+        "noise": "high",
+        "categories": ["all"],
+        "enabled_until": None
+    },
+    "GoogleCSEScraper": {
+        "enabled": True,
+        "core": False,
+        "mode": "production",
+        "cost": "paid",
+        "noise": "low",
+        "categories": ["all"],
+        "enabled_until": None
+    },
+    "GoogleScraper": {
+        "enabled": True,
+        "core": True,
+        "mode": "production",
+        "cost": "free",
+        "noise": "low",
+        "categories": ["all"],
+        "enabled_until": None
+    },
+    "WhatsAppPublicGroupScraper": {
+        "enabled": True,
+        "core": True,
+        "mode": "production",
+        "cost": "free",
+        "noise": "low",
+        "categories": ["all"],
+        "enabled_until": None
+    },
+    "BootstrapScraper": {
+        "enabled": False,
+        "core": False,
+        "mode": "bootstrap",
+        "cost": "free",
+        "noise": "low",
         "categories": ["all"],
         "enabled_until": None
     }
@@ -117,6 +152,20 @@ SCRAPER_REGISTRY = {
 def refresh_scraper_states():
     """Cleanup expired TTLs and enforce safety rules."""
     now = datetime.utcnow()
+    
+    # Sync with GLOBAL SCRAPER_CONFIG
+    mapping = {
+        "facebook": "FacebookMarketplaceScraper",
+        "twitter": "TwitterScraper",
+        "reddit": "RedditScraper",
+        "google_cse": "GoogleCSEScraper"
+    }
+    for k, v in SCRAPER_CONFIG.items():
+        if k in mapping:
+            s_name = mapping[k]
+            if s_name in SCRAPER_REGISTRY:
+                SCRAPER_REGISTRY[s_name]["enabled"] = v.get("enabled", False)
+
     for name, config in SCRAPER_REGISTRY.items():
         # Rule: Trae AI cannot disable core scrapers
         if config.get("core") and not config.get("enabled"):
@@ -158,6 +207,20 @@ def update_scraper_state(name: str, enabled: bool, ttl_minutes: Optional[int] = 
     else:
         config["enabled_until"] = None
         logger.info(f"TOGGLE: '{caller}' {'enabled' if enabled else 'disabled'} {name}")
+    
+    # Update DB if disabled by Optimizer
+    if not enabled and caller == "Self-Optimization Engine":
+        try:
+            from app.db.database import SessionLocal
+            from app.db import models
+            db = SessionLocal()
+            db_metric = db.query(models.ScraperMetric).filter_by(scraper_name=name).first()
+            if db_metric:
+                db_metric.auto_disabled = 1
+                db.commit()
+            db.close()
+        except Exception as e:
+            logger.error(f"Failed to sync auto_disabled to DB for {name}: {e}")
         
     return True, "Success"
 

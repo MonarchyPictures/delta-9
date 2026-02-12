@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Activity, Target } from 'lucide-react';
+import { Search, Activity, Target, MessageSquare, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import LeadCard from '../components/LeadCard';
 import SuccessTicker from '../components/SuccessTicker';
 import MoneyMetrics from '../components/MoneyMetrics';
+import LeadsDrawer from '../components/LeadsDrawer';
 import { EmptyState } from '../components/UXStates';
 import { 
   API_URL, 
@@ -15,27 +16,42 @@ import {
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const ACTIVE_CATEGORY = "vehicles";
+  const location = useLocation();
   const [query, setQuery] = useState('');
+  const [locationStr, setLocationStr] = useState('Kenya');
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [warningMessage, setWarningMessage] = useState('');
   
+  // Drawer state
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [activeFilter, setActiveFilter] = useState(null);
+  
   const searchControllerRef = useRef(null);
+
+  // Sync with URL query param
   useEffect(() => {
-    console.log("API URL:", API_URL);
-    console.log("API KEY:", API_KEY);
-  }, []);
+    const params = new URLSearchParams(location.search);
+    const q = params.get('q');
+    if (q) {
+      setQuery(q);
+      fetchLeads(q);
+    }
+  }, [location.search]);
+
   useEffect(() => {
     fetchLeadsMeta().then(({ leads, warning }) => {
-      setLeads(leads);
+      // User Requested: Frontend Sorting by buyer_match_score
+      const sortedLeads = (leads || []).sort((a, b) => (b.buyer_match_score || 0) - (a.buyer_match_score || 0));
+      setLeads(sortedLeads);
       setWarningMessage(warning || "");
     });
   }, []);
 
   const fetchLeads = async (searchQuery, isPolling = false) => {
+    const searchLocation = locationStr || 'Kenya';
     // Get or create session ID
     let sessionId = localStorage.getItem('d9_session_id');
     if (!sessionId) {
@@ -51,7 +67,9 @@ const Dashboard = () => {
       } else {
         // If it's a foreground request (user search), abort the previous one
         // so we can start the new search immediately
-        searchControllerRef.current.abort();
+        const oldController = searchControllerRef.current;
+        searchControllerRef.current = null; // Clear it before aborting to avoid race conditions
+        oldController.abort();
       }
     }
 
@@ -61,12 +79,12 @@ const Dashboard = () => {
     const controller = new AbortController();
     searchControllerRef.current = controller;
     
-    // Increased timeout for deep discovery (100s) to align with backend
+    // Increased timeout for deep discovery (300s) to align with backend multi-pass strategy
     const timeoutId = setTimeout(() => {
       if (searchControllerRef.current === controller) {
         controller.abort();
       }
-    }, 100000);
+    }, 300000);
 
     try {
       const apiUrl = API_URL;
@@ -87,7 +105,8 @@ const Dashboard = () => {
           },
           body: JSON.stringify({ 
             query: searchQuery, 
-            location: 'Kenya' 
+            location: searchLocation,
+            session_id: sessionId
           }),
           cache: 'no-store' // ENFORCED: No cached data
         });
@@ -102,7 +121,9 @@ const Dashboard = () => {
         const searchData = await searchRes.json();
         if (searchData.warning) setWarningMessage(searchData.warning);
         if (searchData.results && searchData.results.length > 0) {
-          setLeads(searchData.results);
+          // User Requested: Frontend Sorting by buyer_match_score
+          const sortedResults = [...searchData.results].sort((a, b) => (b.buyer_match_score || 0) - (a.buyer_match_score || 0));
+          setLeads(sortedResults);
           setLoading(false);
           return;
         } else if (searchData.status === 'zero_results' || (searchData.results && searchData.results.length === 0)) {
@@ -134,11 +155,16 @@ const Dashboard = () => {
       const data = await res.json();
       if (data.warning) setWarningMessage(data.warning);
       // Handle both { leads: [] } and [] formats
+      let finalLeads = [];
       if (data && data.leads) {
-        setLeads(data.leads);
+        finalLeads = data.leads;
       } else {
-        setLeads(Array.isArray(data) ? data : []);
+        finalLeads = Array.isArray(data) ? data : [];
       }
+
+      // User Requested: Frontend Sorting by buyer_match_score
+      const sortedLeads = [...finalLeads].sort((a, b) => (b.buyer_match_score || 0) - (a.buyer_match_score || 0));
+      setLeads(sortedLeads);
     } catch (err) {
       if (err.name === 'AbortError') return;
       if (!isPolling) {
@@ -188,56 +214,161 @@ const Dashboard = () => {
 
   const trendingSearches = [
     { term: 'Toyota', label: 'Toyota' },
-    { term: 'Nissan', label: 'Nissan' },
-    { term: 'Subaru', label: 'Subaru' },
-    { term: 'Isuzu', label: 'Isuzu' },
-    { term: 'Prado', label: 'Prado' },
-    { term: 'Vitz', label: 'Vitz' },
-    { term: 'Mitsubishi', label: 'Mitsubishi' },
-    { term: 'Mazda', label: 'Mazda' }
+    { term: 'House', label: 'Real Estate' },
+    { term: 'iPhone', label: 'Electronics' },
+    { term: 'Laptop', label: 'Tech' },
+    { term: 'Water Tank', label: 'Construction' },
+    { term: 'Sofa', label: 'Furniture' },
+    { term: 'Solar Panel', label: 'Energy' },
+    { term: 'Office Space', label: 'Commercial' }
   ];
 
   return (
-    <div className={`flex-1 flex flex-col ${!hasSearched ? 'justify-center' : 'pt-12'} bg-black overflow-hidden`}>
+    <div className={`flex-1 flex flex-col bg-black overflow-y-auto ${!hasSearched ? 'justify-start md:justify-center py-12' : 'pt-12'}`}>
+      <SuccessTicker onMetricClick={(filter) => {
+        setActiveFilter(filter);
+        setIsDrawerOpen(true);
+      }} />
       <div className="w-full max-w-4xl mx-auto px-4 mb-8">
-        <MoneyMetrics />
         {!hasSearched && (
           <div className="text-center mb-12">
             <h1 className="text-5xl font-black text-white tracking-tighter italic mb-4 uppercase">
-              Live Vehicle <span className="text-blue-600">Buyers & Sellers</span> in Kenya
+              🔍 Delta<span className="text-blue-600">9</span>
             </h1>
             <p className="text-white/40 text-[10px] font-black uppercase tracking-[0.5em]">
-              Verified vehicle demand updated in real time
+              Market Intelligence Node
             </p>
           </div>
         )}
+
+        <div className="flex flex-col md:flex-row gap-4 mb-6">
+          <div className="flex-1 relative group">
+            <Search className="absolute left-6 top-1/2 -translate-y-1/2 h-6 w-6 text-white/20 group-focus-within:text-blue-500" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={handleSearch}
+              placeholder="Product / Service"
+              className="w-full bg-white/5 border border-white/10 text-white text-xl rounded-3xl pl-16 p-6 shadow-2xl outline-none font-black placeholder:text-white/10 italic focus:border-blue-500/50 focus:bg-white/10 transition-all uppercase tracking-tight"
+            />
+            <div className="absolute right-6 top-1/2 -translate-y-1/2 flex items-center gap-2">
+              <span className="hidden md:block text-[8px] font-black text-white/10 uppercase tracking-widest border border-white/5 px-2 py-1 rounded">Strict Mode</span>
+            </div>
+          </div>
+          <div className="w-full md:w-64 relative group">
+            <input
+              type="text"
+              value={locationStr}
+              onChange={(e) => setLocationStr(e.target.value)}
+              onKeyDown={handleSearch}
+              placeholder="Location"
+              className="w-full bg-white/5 border border-white/10 text-white text-xl rounded-3xl p-6 shadow-2xl outline-none font-black placeholder:text-white/10 italic focus:border-blue-500/50 focus:bg-white/10 transition-all uppercase tracking-tight"
+            />
+          </div>
+        </div>
+
+        <MoneyMetrics onMetricClick={(filter) => {
+          setActiveFilter(filter);
+          setIsDrawerOpen(true);
+        }} />
+        
+        {/* User Requested: Live Actionable Leads Section */}
+        {leads.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="mt-8 mb-8"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {leads.slice(0, 4).map((lead, index) => {
+                const isRecent = lead.timestamp && (new Date() - new Date(lead.timestamp)) < 24 * 60 * 60 * 1000;
+                const isHighIntent = lead.intent_score >= 0.8;
+                const hasWhatsApp = !!lead.whatsapp_link;
+                
+                return (
+                  <motion.div 
+                    key={lead.id || `quick-lead-${index}`} 
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                    className="bg-white/5 border border-white/10 rounded-2xl p-5 hover:border-blue-500/50 transition-all group"
+                  >
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex flex-wrap gap-2">
+                        {isHighIntent && (
+                          <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-red-500/10 text-red-500 border border-red-500/20">
+                            🔥 High intent
+                          </span>
+                        )}
+                        {hasWhatsApp && (
+                          <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-green-500/10 text-green-500 border border-green-500/20">
+                            💬 WhatsApp
+                          </span>
+                        )}
+                        {isRecent && (
+                          <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                            ⏱ Recent
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-white/40 text-[10px] font-black uppercase tracking-widest bg-white/5 px-2 py-1 rounded">Score: {lead.intent_score || lead.score}</div>
+                    </div>
+                    
+                    <h3 className="text-white font-black text-lg mb-4 italic leading-tight">
+                      "{lead.intent?.length > 60 ? lead.intent.substring(0, 60) + '...' : lead.intent}"
+                    </h3>
+
+                    <div className="flex gap-3 mt-auto">
+                      {lead.whatsapp_url && (
+                        <a 
+                          href={lead.whatsapp_url} 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="flex-1 bg-green-600/20 hover:bg-green-600 text-green-500 hover:text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-center transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <MessageSquare size={14} /> WhatsApp
+                        </a>
+                      )}
+                      {lead.source_url && (
+                        <a 
+                          href={lead.source_url} 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="flex-1 bg-white/5 hover:bg-white/10 text-white/40 hover:text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-center transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <Activity size={14} /> Source
+                        </a>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+            
+            <button 
+              onClick={() => {
+                setActiveFilter(`/leads?q=${query}`);
+                setIsDrawerOpen(true);
+              }}
+              className="w-full mt-6 py-4 bg-blue-600/10 hover:bg-blue-600 text-blue-500 hover:text-white border border-blue-500/20 hover:border-blue-600 rounded-2xl text-[10px] font-black uppercase tracking-[0.3em] transition-all flex items-center justify-center gap-2 cursor-pointer"
+            >
+              View More Verified Signals <Zap size={14} />
+            </button>
+          </motion.div>
+        )}
+
         {warningMessage && !hasSearched && (
           <div className="mx-4 mb-4 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 p-4">
             <p className="text-yellow-500 text-xs font-black uppercase tracking-widest">{warningMessage}</p>
           </div>
         )}
-
-        <div className="relative group mb-6">
-          <Search className="absolute left-6 top-1/2 -translate-y-1/2 h-6 w-6 text-white/20 group-focus-within:text-blue-500" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleSearch}
-            placeholder="ENTER VEHICLE MAKE OR MODEL (e.g. 'Toyota Land Cruiser')..."
-            className="w-full bg-white/5 border border-white/10 text-white text-xl rounded-3xl pl-16 p-6 shadow-2xl outline-none font-black placeholder:text-white/10 italic focus:border-blue-500/50 focus:bg-white/10 transition-all uppercase tracking-tight"
-          />
-          <div className="absolute right-6 top-1/2 -translate-y-1/2 flex items-center gap-2">
-            <span className="hidden md:block text-[8px] font-black text-white/10 uppercase tracking-widest border border-white/5 px-2 py-1 rounded">Strict Mode</span>
-          </div>
-        </div>
-
         {/* Google CSE Search Box */}
         <div className="gcse-search mb-6"></div>
 
         {!hasSearched && (
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <span className="text-[10px] font-black text-white/20 uppercase tracking-widest mr-2">Trending Vehicles:</span>
+            <span className="text-[10px] font-black text-white/20 uppercase tracking-widest mr-2">Trending:</span>
             {trendingSearches.map((item) => (
               <button
                 key={item.term}
@@ -245,7 +376,7 @@ const Dashboard = () => {
                   setQuery(item.term);
                   fetchLeads(item.term);
                 }}
-                className="px-4 py-2 rounded-full bg-white/5 border border-white/10 text-white/40 text-[10px] font-black hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all uppercase tracking-wider"
+                className="px-4 py-2 rounded-full bg-white/5 border border-white/10 text-white/40 text-[10px] font-black hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all uppercase tracking-wider cursor-pointer"
               >
                 {item.label}
               </button>
@@ -276,12 +407,23 @@ const Dashboard = () => {
               <div className="grid grid-cols-1 gap-4">
                 {errorMessage ? (
                   <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-8 text-center">
-                    <p className="text-red-500 font-black uppercase tracking-widest text-sm mb-2">PROD_STRICT PIPELINE FAILED</p>
+                    <p className="text-red-500 font-black uppercase tracking-widest text-sm mb-2">
+                      Pipeline Status: {warningMessage ? "BOOTSTRAP / DEV" : "PROD_STRICT"}
+                    </p>
                     <p className="text-white font-bold text-lg">{errorMessage}</p>
-                    <p className="text-white/40 text-xs mt-4 uppercase tracking-tighter">Only independently verified outbound signals are permitted in production.</p>
+                    <p className="text-white/40 text-[10px] mt-4 uppercase tracking-tighter">
+                      {warningMessage 
+                        ? "Local development mode enabled. Bypassing strict verification for testing." 
+                        : "Only independently verified outbound signals are permitted in production mode."}
+                    </p>
+                    {errorMessage.includes("Failed to fetch") && (
+                      <p className="text-blue-400 text-[10px] mt-2 font-bold uppercase">
+                        Tip: Ensure backend is running at {API_URL} and check CORS settings.
+                      </p>
+                    )}
                   </div>
-                ) : leads.length > 0 ? leads.map((lead) => (
-                  <LeadCard key={lead.lead_id} lead={lead} onStatusChange={handleStatusChange} />
+                ) : leads.length > 0 ? leads.map((lead, index) => (
+                  <LeadCard key={lead.lead_id || lead.id || `lead-${index}`} lead={lead} onStatusChange={handleStatusChange} />
                 )) : (
                   <EmptyState />
                 )}
@@ -290,6 +432,13 @@ const Dashboard = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Side Panel for Quick Filtered View */}
+      <LeadsDrawer 
+        isOpen={isDrawerOpen} 
+        onClose={() => setIsDrawerOpen(false)} 
+        filterType={activeFilter} 
+      />
     </div>
   );
 };

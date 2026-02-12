@@ -1,63 +1,70 @@
 import logging
-from bs4 import BeautifulSoup
-from .base_scraper import BaseScraper
+import re
+from datetime import datetime, timezone
+from .base_scraper import BaseScraper, ScraperSignal
 
 logger = logging.getLogger(__name__)
 
-class GoogleScraper(BaseScraper):
-    def scrape(self, query: str, time_window_hours: int):
-        tbs = "qdr:h"
-        if time_window_hours > 1 and time_window_hours <= 24:
-            tbs = f"qdr:h{time_window_hours}"
-            if time_window_hours == 24: tbs = "qdr:d"
-        elif time_window_hours > 24:
-            days = time_window_hours // 24
-            if days >= 7:
-                tbs = "qdr:w"
-            else:
-                tbs = f"qdr:d{days}"
-            
-        url = f"https://www.google.com/search?q={query}&tbs={tbs}&gl=ke&hl=en&gws_rd=cr"
-        logger.info(f"OUTBOUND CALL: Google Scrape for {query} (Window: {time_window_hours}h, TBS: {tbs})")
+class GoogleScraper(BaseScraper): 
+    source = "google" 
+
+    def scrape(self, query: str, time_window_hours: int): 
+        logger.info(f"GOOGLE: Scraping for {query}")
+        # Build a simpler query for better recall on Google
+        # We'll use the core query terms but relax the mandatory quotes slightly
+        clean_query = query.replace('"', '')
+        search_query = f'{clean_query} (site:facebook.com OR site:jiji.co.ke OR site:pigiame.co.ke)'
         
-        content = self.get_page_content(url)
-        if not content: 
-            logger.warning(f"Google Scrape: No content returned for {query}")
+        url = f"https://www.google.com/search?q={search_query}" 
+        
+        html = self.get_page_content(url, wait_selector="div#search")
+        
+        if not html:
+            logger.warning("GOOGLE: No HTML content received")
             return []
+ 
+        results = [] 
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, 'html.parser')
         
-        soup = BeautifulSoup(content, 'html.parser')
-        results = []
-        search_results = soup.select('div.g') or soup.select('div[data-ved]') or soup.select('div.MjjYud') or soup.select('div.tF2Cxc')
+        # Google search results are usually in 'div.g' or 'div.MjjYud'
+        search_results = soup.select('div.g') or soup.select('div.MjjYud')
+        logger.info(f"GOOGLE: Found {len(search_results)} result blocks")
         
-        for g in search_results:
-            try:
-                link_tag = g.select_one('a')
-                if not link_tag: continue
-                
-                title_tag = g.select_one('h3') or g.select_one('div[role="heading"]') or g.select_one('div.vv77sc')
-                snippet_tag = g.select_one('div.VwiC3b') or g.select_one('div.kb0u9b') or g.select_one('div.st') or g.select_one('span.aCOp7e')
-                
-                link = link_tag['href'] if link_tag.has_attr('href') else ""
-                title = title_tag.text if title_tag else ""
-                snippet = snippet_tag.text if snippet_tag else ""
-                
-                if link.startswith('/url?q='):
-                    link = link.split('/url?q=')[1].split('&')[0]
-                elif link.startswith('/'):
-                    continue
-                    
-                if link and title and not any(x in link for x in ['accounts.google.com', 'google.com/search', 'maps.google.com']):
-                    results.append({
-                        "intent_text": f"{title} {snippet}",
-                        "link": link,
-                        "source": "Google",
-                        "product": query,
-                        "location": "Kenya",
-                        "contact_method": f"Web: {link}",
-                        "confidence_score": 0.7
-                    })
-            except Exception as e:
-                logger.error(f"Error parsing Google result: {e}")
+        if len(search_results) == 0:
+            # Try a broader fallback selector
+            search_results = soup.select('div[data-hveid]')
+            logger.info(f"GOOGLE: Fallback found {len(search_results)} potential result blocks")
+
+        for res in search_results:
+            link_tag = res.select_one('a')
+            # Multiple possible snippet selectors
+            snippet_tag = res.select_one('div.VwiC3b') or res.select_one('div.kb0u9b') or res.select_one('span.st') or res.select_one('.yD9P9') or res.select_one('.MUF3bd')
+            
+            if not link_tag or not snippet_tag:
                 continue
-        
-        return results
+                
+            link = link_tag.get('href')
+            snippet = snippet_tag.get_text()
+            
+            if not link or not snippet or not link.startswith('http'):
+                continue
+
+            if any(x in link for x in ["google.com", "gstatic.com", "youtube.com"]):
+                continue
+
+            logger.info(f"GOOGLE: Found potential lead at {link}")
+            
+            # 🎯 DUMB SCRAPER: Standardized Signal Output
+            signal = ScraperSignal(
+                source=self.source,
+                text=snippet,
+                author="Google Search Result",
+                contact=self.extract_contact_info(f"{snippet}"),
+                location="Kenya",
+                url=link,
+                timestamp=datetime.now(timezone.utc).isoformat()
+            )
+            results.append(signal.model_dump())
+ 
+        return results[:10]

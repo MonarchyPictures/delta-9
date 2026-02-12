@@ -44,9 +44,13 @@ celery_app.conf.update(
     timezone="Africa/Nairobi",
     enable_utc=True,
     beat_schedule={
-        "daily-agents-run": {
+        "check-agents-every-15-min": {
             "task": "run_all_agents",
-            "schedule": crontab(hour=2, minute=0),  # Run at 2 AM daily
+            "schedule": 900.0, # Run every 15 minutes
+        },
+        "cleanup-every-12-hours": {
+            "task": "cleanup_old_leads",
+            "schedule": 43200.0,
         },
     },
 )
@@ -162,12 +166,28 @@ def specialops_mission_task(query: str, location: str = "Kenya", agent_id: int =
 
 @celery_app.task(name="run_all_agents")
 def run_all_agents():
-    """Trigger all active agents to run their searches."""
+    """Trigger active agents that are due for discovery."""
     db = SessionLocal()
     try:
-        active_agents = db.query(models.Agent).filter(models.Agent.is_active == 1).all()
+        now = datetime.now()
+        # Find active agents where next_run_at is reached or never set
+        active_agents = db.query(models.Agent).filter(
+            models.Agent.is_active == 1,
+            (models.Agent.next_run_at <= now) | (models.Agent.next_run_at == None)
+        ).all()
+        
         for agent in active_agents:
+            # Check if agent has expired (duration_days reached)
+            if agent.created_at:
+                expiry_time = agent.created_at + timedelta(days=agent.duration_days)
+                if now > expiry_time:
+                    logger.info(f"Agent '{agent.name}' (ID: {agent.id}) has expired. Deactivating.")
+                    agent.is_active = 0
+                    db.commit()
+                    continue
+            
             run_agent_task.delay(agent.id)
+            
         return f"Triggered {len(active_agents)} agents"
     except Exception as e:
         logger.error(f"Error in run_all_agents: {e}")
@@ -227,24 +247,22 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
                     
                 normalized = validator.normalize_lead(raw, db=db)
                 if not normalized:
-                    continue # Skip leads that fail strict contact verification
-                
-                # Check Min Intent Score from Agent
-                if normalized.get("intent_score", 0) < min_intent:
-                    logger.info(f"Skipping lead due to low intent score: {normalized.get('intent_score')} < {min_intent}")
+                    logger.info(f"Skipping empty normalization for lead from {platform}")
                     continue
+                
+                # Metadata check (Replaces hard skip)
+                if normalized.get("intent_score", 0) < min_intent:
+                    logger.info(f"Signal recorded with low intent score: {normalized.get('intent_score')} < {min_intent} (threshold for agent {agent_id})")
 
                 # 3. Duplicate Detection
                 if detector.is_duplicate(normalized["buyer_request_snippet"], recent_texts):
                     logger.info(f"Skipping duplicate lead from {platform}: {normalized['buyer_request_snippet'][:50]}...")
                     continue
 
-                # RELAXED KENYA FILTERING
+                # Metadata check for Kenya (Replaces hard skip)
                 loc = normalized.get("location_raw", "").lower()
                 is_kenya = "kenya" in loc or any(city.lower() in loc for city in ["nairobi", "mombasa", "kisumu", "nakuru", "eldoret", "thika", "naivasha"])
                 
-                # If it's not explicitly Kenya but the query was for Kenya, and it's a social post, we'll keep it
-                # unless it explicitly mentions another country
                 if not is_kenya:
                     other_countries = ["nigeria", "uganda", "tanzania", "usa", "uk", "india", "ghana", "south africa"]
                     mentions_other = any(c in loc for c in other_countries)
@@ -252,8 +270,8 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
                         is_kenya = True
                 
                 if not is_kenya:
-                    logger.info(f"Skipping lead due to location: {loc}")
-                    continue
+                    logger.info(f"Signal recorded from outside primary geo: {loc}")
+                    # We save it anyway, but we might want to flag it
 
                 # Check for history of non-response
                 has_bad_history = outreach.check_non_response_history(
@@ -346,7 +364,20 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
                 
                 # Check if lead exists by link
                 existing = db.query(models.Lead).filter(models.Lead.post_link == lead.post_link).first()
-                if not existing:
+                
+                # Check if this phone already exists for this agent (Duplicate Prevention)
+                is_phone_duplicate = False
+                if agent and lead.contact_phone:
+                    # Check across all leads this agent has found
+                    existing_agent_leads = db.query(models.AgentLead).join(models.Lead).filter(
+                        models.AgentLead.agent_id == agent.id,
+                        models.Lead.contact_phone == lead.contact_phone
+                    ).first()
+                    if existing_agent_leads:
+                        is_phone_duplicate = True
+                        logger.info(f"Skipping lead for agent {agent.id}: Phone {lead.contact_phone} already discovered by this agent.")
+
+                if not existing and not is_phone_duplicate:
                     # REAL-TIME ALERT LOGIC
                     if agent and agent.enable_alerts:
                         # Update notes with alert info
@@ -359,10 +390,43 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
                             message=f"🚨 REAL-TIME ALERT: New lead for '{agent.query}' found on {platform}!"
                         )
                         db.add(notification)
+                        
+                        # Store in AgentLead table
+                        agent_lead = models.AgentLead(
+                            agent_id=agent.id,
+                            lead_id=lead.id
+                        )
+                        db.add(agent_lead)
+                        
                         alert_count += 1
                     
                     db.add(lead)
                     processed_count += 1
+                elif existing and not is_phone_duplicate:
+                    # Lead exists in system but first time for this specific agent
+                    if agent and agent.enable_alerts:
+                        # Check if agent already has this specific lead record
+                        already_linked = db.query(models.AgentLead).filter(
+                            models.AgentLead.agent_id == agent.id,
+                            models.AgentLead.lead_id == existing.id
+                        ).first()
+                        
+                        if not already_linked:
+                            # Create notification for existing lead
+                            notification = models.Notification(
+                                lead_id=existing.id,
+                                agent_id=agent.id,
+                                message=f"🚨 RADAR MATCH: Agent '{agent.name}' found an existing lead matching '{agent.query}'!"
+                            )
+                            db.add(notification)
+                            
+                            # Store link
+                            agent_lead = models.AgentLead(
+                                agent_id=agent.id,
+                                lead_id=existing.id
+                            )
+                            db.add(agent_lead)
+                            alert_count += 1
             except Exception as e:
                 logger.error(f"Error processing lead from {platform}: {e}")
                 continue
@@ -400,10 +464,11 @@ def run_agent_task(agent_id: int):
                 min_intent=agent.min_intent_score
             )
             
-        # Update last run timestamp
+        # Update last run and next run timestamps
         agent.last_run = datetime.now()
+        agent.next_run_at = agent.last_run + timedelta(hours=agent.interval_hours or 2)
         db.commit()
-        return f"Agent {agent.name} triggered discovery on {len(platforms)} platforms"
+        return f"Agent {agent.name} triggered discovery on {len(platforms)} platforms. Next run: {agent.next_run_at}"
     except Exception as e:
         db.rollback()
         logger.error(f"CRITICAL: Agent {agent_id} execution failed. Error: {e}")

@@ -1,15 +1,20 @@
 import os
+from dotenv import load_dotenv
 
-# 🌍 Environment Detection
-ENV = os.getenv("DELTA9_ENV", "local")
+# Load .env file if it exists
+load_dotenv()
 
-if ENV == "local":
+# 🌍 Pipeline Configuration
+# KEEP ONLY: bootstrap (local + dev), strict (future prod)
+PIPELINE_MODE = os.getenv("PIPELINE_MODE", "bootstrap").lower()
+if PIPELINE_MODE not in ["bootstrap", "strict"]:
     PIPELINE_MODE = "bootstrap"
-else:
-    PIPELINE_MODE = "prod_strict"
+
+# Single rule: Flexible query-based discovery
+PIPELINE_QUERY = os.getenv("PIPELINE_QUERY", "").lower()
+PIPELINE_CATEGORY = os.getenv("PIPELINE_CATEGORY", "general").lower()
 
 # 🚀 Bootstrap rules for local development
-# 🚫 Never show PROD_STRICT errors in local dev again.
 BOOTSTRAP_RULES = {
     "min_sources": 1,
     "min_confidence": 0.4,
@@ -18,4 +23,7 @@ BOOTSTRAP_RULES = {
 }
 
 def is_prod() -> bool:
-    return PIPELINE_MODE == "prod_strict"
+    return PIPELINE_MODE == "strict"
+
+def is_bootstrap() -> bool:
+    return PIPELINE_MODE == "bootstrap"

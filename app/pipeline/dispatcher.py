@@ -1,0 +1,117 @@
+from fastapi import BackgroundTasks
+import logging
+import time
+from typing import List, Dict, Any, Optional
+from sqlalchemy.orm import Session
+from app.db.database import SessionLocal
+from app.ingestion import LiveLeadIngestor
+from app.intelligence.expand import expand_query
+from app.config import PIPELINE_MODE
+
+logger = logging.getLogger(__name__)
+
+def run_background_discovery(query: str, location: str):
+    """
+    🛠️ Background Task: Continues discovery for the remaining queries 
+    to populate cache and metrics after an early return.
+    """
+    logger.info(f"BACKGROUND DISCOVERY: Starting full pass for '{query}' in {location}")
+    db = SessionLocal()
+    try:
+        ingestor = LiveLeadIngestor(db)
+        # Run with early_return=False to ensure full coverage in background
+        leads = ingestor.fetch_from_external_sources(query, location, early_return=False)
+        if leads:
+            logger.info(f"BACKGROUND DISCOVERY: Saving {len(leads)} leads for '{query}'")
+            ingestor.save_leads_to_db(leads)
+        logger.info(f"BACKGROUND DISCOVERY: Completed for '{query}'")
+    except Exception as e:
+        logger.error(f"BACKGROUND DISCOVERY ERROR: {str(e)}")
+    finally:
+        db.close()
+
+async def run_pipeline(query: str, location: str, headers: Dict[str, Any] = None, background_tasks: BackgroundTasks = None) -> List[Dict[str, Any]]:
+    """
+    🎯 The Engine: Generic pipeline dispatcher.
+    Expands query, fetches leads, scores them, and returns verified buyers.
+    Includes Early Return logic for instant UX.
+    """
+    start_time = time.time()
+    db = SessionLocal()
+    try:
+        # 1. Expand Query (Generic expansion)
+        expanded_queries = expand_query(query)
+        logger.info(f"PIPELINE: Expanding '{query}' -> {expanded_queries}")
+
+        ingestor = LiveLeadIngestor(db)
+        all_results = []
+
+        # 2. Run enabled scrapers for the primary query first (Speed Optimized)
+        # We use early_return=True to return as soon as we have >= 2 signals
+        primary_leads = ingestor.fetch_from_external_sources(query, location, early_return=True)
+        all_results.extend(primary_leads)
+
+        # 🚀 EARLY RETURN CHECK: If we found enough signals from the primary query, 
+        # return immediately and move the expanded queries AND the full pass of the primary query to background.
+        if len(primary_leads) >= 2:
+            logger.info(f"PIPELINE SPEED: Early return triggered with {len(primary_leads)} signals.")
+            if background_tasks:
+                # 1. Complete the full pass for the primary query in background
+                background_tasks.add_task(run_background_discovery, query, location)
+                # 2. Complete expanded queries in background
+                for eq in expanded_queries:
+                    if eq != query:
+                        background_tasks.add_task(run_background_discovery, eq, location)
+        else:
+            # 3. Fallback: Run expanded queries sequentially if primary query was dry
+            for q in expanded_queries:
+                if q == query: continue # Already did this
+                normalized_query = q.strip()
+                leads = ingestor.fetch_from_external_sources(normalized_query, location, early_return=True)
+                all_results.extend(leads)
+                if len(all_results) >= 2:
+                    break
+
+        # 3. Final De-duplication (by source_url or text hash if URL missing)
+        unique_results = {}
+        for lead in all_results:
+            # Use URL as primary key, fall back to text hash for URL-less signals
+            url = lead.get('source_url')
+            if not url:
+                # Fallback key: Phone + Snippet hash
+                phone = lead.get('contact_phone') or ""
+                text = lead.get('buyer_request_snippet') or ""
+                url = f"signal://{phone}:{hash(text)}"
+            
+            if url not in unique_results:
+                unique_results[url] = lead
+            else:
+                # Keep the one with higher intent score if duplicates exist
+                if lead.get('intent_score', 0) > unique_results[url].get('intent_score', 0):
+                    unique_results[url] = lead
+
+        final_leads = list(unique_results.values())
+        
+        from app.scrapers.metrics import SCRAPER_METRICS
+
+        # 4. Sort by weighted intent score (intent_score * priority_boost)
+        def get_weighted_score(lead):
+            base_score = lead.get('intent_score', 0)
+            scraper_name = lead.get('_scraper_name')
+            boost = 1.0
+            if scraper_name and scraper_name in SCRAPER_METRICS:
+                boost = SCRAPER_METRICS[scraper_name].get('priority_boost', 1.0)
+            return base_score * boost
+
+        final_leads.sort(key=get_weighted_score, reverse=True)
+
+        duration = time.time() - start_time
+        logger.info(f"PIPELINE COMPLETE: Found {len(final_leads)} leads for '{query}' in {duration:.2f}s")
+        
+        return final_leads
+
+    except Exception as e:
+        logger.error(f"PIPELINE ERROR: {str(e)}")
+        return []
+    finally:
+        db.close()

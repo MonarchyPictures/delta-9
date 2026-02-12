@@ -12,16 +12,16 @@ def seed_data():
     
     now = datetime.now(timezone.utc)
     
-    # Sample leads with Kenya context and varied filter attributes
+    # Sample leads with Kenya context and varied filter attributes (Vehicles focus)
     sample_leads = [
         {
             "id": str(uuid.uuid4()),
             "source_platform": "Twitter",
-            "post_link": "https://twitter.com/user/tires_1",
+            "source_url": "https://twitter.com/user/toyota_1",
             "location_raw": "Westlands, Nairobi",
             "property_country": "Kenya",
-            "buyer_request_snippet": "I need new tires for my Prado ASAP. Westlands area.",
-            "product_category": "Tires",
+            "buyer_request_snippet": "I need a Toyota Prado ASAP. Westlands area. Budget 4.5M.",
+            "product_category": "Toyota",
             "intent_score": 0.95,
             "radius_km": 2.5,
             "contact_phone": "+254712345678",
@@ -32,11 +32,11 @@ def seed_data():
         {
             "id": str(uuid.uuid4()),
             "source_platform": "Facebook",
-            "post_link": "https://facebook.com/groups/tanks_1",
+            "source_url": "https://facebook.com/groups/nissan_1",
             "location_raw": "Kitengela, Kajiado",
             "property_country": "Kenya",
-            "buyer_request_snippet": "Looking for 10,000L water tanks for my farm in Kitengela.",
-            "product_category": "Water Tanks",
+            "buyer_request_snippet": "Looking for a Nissan X-Trail for family use. Kitengela.",
+            "product_category": "Nissan",
             "intent_score": 0.88,
             "radius_km": 45.0,
             "contact_phone": "+254722998877",
@@ -47,14 +47,14 @@ def seed_data():
         {
             "id": str(uuid.uuid4()),
             "source_platform": "Reddit",
-            "post_link": "https://reddit.com/r/kenya/solar",
+            "source_url": "https://reddit.com/r/kenya/subaru",
             "location_raw": "Nakuru",
             "property_country": "Kenya",
-            "buyer_request_snippet": "Anyone selling solar panels in Nakuru? Planning to install next month.",
-            "product_category": "Solar Panels",
+            "buyer_request_snippet": "Anyone selling a Subaru Forester in Nakuru? Planning to buy next month.",
+            "product_category": "Subaru",
             "intent_score": 0.65,
             "radius_km": 150.0,
-            "contact_phone": None, # No WhatsApp
+            "contact_phone": None, 
             "buyer_name": "David Otieno",
             "status": models.CRMStatus.NEW,
             "created_at": now - timedelta(hours=30)
@@ -62,11 +62,11 @@ def seed_data():
         {
             "id": str(uuid.uuid4()),
             "source_platform": "Twitter",
-            "post_link": "https://twitter.com/user/tires_2",
+            "source_url": "https://twitter.com/user/isuzu_1",
             "location_raw": "Eldoret",
             "property_country": "Kenya",
-            "buyer_request_snippet": "Where can I get truck tires in Eldoret? Bulk order.",
-            "product_category": "Tires",
+            "buyer_request_snippet": "Where can I get an Isuzu FRR truck in Eldoret? Bulk order for transport business.",
+            "product_category": "Isuzu",
             "intent_score": 0.92,
             "radius_km": 300.0,
             "contact_phone": "+254733112233",
@@ -77,11 +77,11 @@ def seed_data():
         {
             "id": str(uuid.uuid4()),
             "source_platform": "Instagram",
-            "post_link": "https://instagram.com/p/cement_1",
+            "source_url": "https://instagram.com/p/mazda_1",
             "location_raw": "Mombasa Road, Nairobi",
             "property_country": "Kenya",
-            "buyer_request_snippet": "I need 100 bags of cement delivered to my site on Mombasa Road.",
-            "product_category": "Cement",
+            "buyer_request_snippet": "I need a Mazda Demio for Uber business. Delivery to Mombasa Road.",
+            "product_category": "Mazda",
             "intent_score": 0.98,
             "radius_km": 12.0,
             "contact_phone": "+254700554433",

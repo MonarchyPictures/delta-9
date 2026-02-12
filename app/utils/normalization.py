@@ -23,12 +23,22 @@ class LeadValidator:
         import logging
         logger = logging.getLogger("radar_api")
         
-        # ABSOLUTE RULE: DISCARD IF NOT BUYER
+        # 🔒 CATEGORY METADATA (Replaces strict enforcement)
+        vehicle_keywords = [
+            "car", "vehicle", "toyota", "nissan", "subaru", "isuzu", "mazda", "honda", "mitsubishi",
+            "prado", "vitz", "land cruiser", "hilux", "demio", "note", "forester", "truck", "pickup",
+            "van", "bus", "spare parts", "engine", "gearbox", "tyre", "rim", "brakes"
+        ]
+        is_vehicle = any(kw in text.lower() for kw in vehicle_keywords)
+        
+        # LOGGING (No longer discarding)
+        if not is_vehicle:
+            logger.info(f"ℹ️ Normalization metadata: Non-vehicle signal detected. Text: {text[:150]}")
+        
         if classification != "BUYER":
-            logger.info(f"❌ Normalization DISCARDED lead: Classification is {classification}. Text: {text[:150]}")
-            return None # DISCARD IMMEDIATELY
+            logger.info(f"ℹ️ Normalization metadata: Signal classification is {classification}. Text: {text[:150]}")
             
-        logger.info(f"✅ Normalization ACCEPTED lead: Classification is {classification}. Text: {text[:150]}")
+        logger.info(f"✅ Normalization processing lead: Classification={classification}, is_vehicle={is_vehicle}. Text: {text[:150]}")
         entities = self.nlp.extract_entities(text)
         intent_score = self.nlp.calculate_intent_score(text)
         
@@ -60,7 +70,7 @@ class LeadValidator:
         # Authenticity & Verification
         phone = self._extract_phone(text)
         email = self._extract_email(text)
-        social_link = raw_data.get("link") or raw_data.get("url")
+        social_link = raw_data.get("url")
         
         # Contact Verification & Reliability
         is_phone_v, phone_meta = self.verifier.verify_phone(phone) if phone else (False, {})
@@ -79,22 +89,18 @@ class LeadValidator:
         logger = logging.getLogger("radar_api")
         
         if not (is_phone_v or is_email_v or social_link):
-            logger.info(f"Normalization dropped lead: No contact method. Phone: {phone}, Email: {email}, Link: {social_link}")
-            return None # Drop leads with zero working contact methods
+            logger.info(f"Normalization metadata: No direct contact method. Phone: {phone}, Email: {email}, URL: {social_link}")
+            # We still save it as a "signal" but it might have limited utility for outreach
             
-        # Social Filtering: Require some intent for social posts to avoid homepages/landing pages
-        # Relaxed threshold to ensure "No Signals Detected" is minimized
-        # If classification is already BUYER, we are MUCH more lenient
+        # Social Filtering: No longer discarding low intent
         min_intent = 0.05 if classification == "BUYER" else 0.15
-        
         if is_social and intent_score < min_intent:
-            logger.info(f"Normalization dropped {platform} lead: Low intent score ({intent_score}). Link: {social_link}")
-            return None
+            logger.info(f"Normalization metadata: Low intent signal ({intent_score}) from {platform}. URL: {social_link}")
             
         reliability_score, preferred_method = self.verifier.calculate_reliability_score({
             "contact_phone": phone_to_save if is_phone_v else None,
             "contact_email": email_to_save if is_email_v else None,
-            "post_link": social_link if is_social_v else None
+            "source_url": social_link if is_social_v else None
         })
         
         # Real-Time & Competitive Intelligence
@@ -129,11 +135,11 @@ class LeadValidator:
         # 4. Seller Match Analysis
         advantages = self.market.calculate_seller_advantages(lead_data_for_points)
         p_strategy = self.market.recommend_pricing_strategy(lead_data_for_points)
-
+        
         return {
             "id": str(uuid.uuid4()),
             "source_platform": raw_data.get("source", "Unknown"),
-            "post_link": raw_data.get("link"),
+            "source_url": social_link,
             "timestamp": datetime.now(),
             "location_raw": location_raw,
             "latitude": lat,
@@ -209,7 +215,7 @@ class LeadValidator:
             "is_genuine_buyer": 1 if is_genuine else 0,
             "contact_phone": phone_to_save,
             "contact_email": email_to_save,
-            "social_links": [raw_data.get("link")],
+            "source_url": social_link,
             "notes": f"Readiness: {readiness} | Deal Prob: {deal_prob}% | Specs: {specs}",
             "last_activity": datetime.now()
         }

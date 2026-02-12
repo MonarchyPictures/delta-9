@@ -2,7 +2,7 @@ import os
 import hmac
 import hashlib
 from fastapi import HTTPException, Request, Header
-from app.config import ADMIN_SECRET_KEY
+from app.config import ADMIN_SECRET_KEY, PIPELINE_MODE
 
 def require_admin(request: Request, x_role: str = Header(None), x_admin_signature: str = Header(None)):
     """
@@ -13,7 +13,7 @@ def require_admin(request: Request, x_role: str = Header(None), x_admin_signatur
         raise HTTPException(status_code=403, detail="Access denied: Required role 'user' not found.")
     
     # In production, require a signed header for any action that bypasses user limits
-    if os.getenv("DELTA9_ENV") == "prod":
+    if PIPELINE_MODE == "strict":
         if not x_admin_signature:
             raise HTTPException(status_code=401, detail="Production Security: Missing admin signature.")
         

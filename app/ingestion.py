@@ -5,9 +5,15 @@ import random
 import logging
 import requests
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from .utils.logging import get_logger
 from sqlalchemy.orm import Session
-from .scrapers.base_scraper import BaseScraper, GoogleScraper, FacebookMarketplaceScraper, DuckDuckGoScraper, SerpApiScraper
+from .scrapers.base_scraper import BaseScraper
+from .scrapers.google_scraper import GoogleScraper
+from .scrapers.facebook_marketplace import FacebookMarketplaceScraper
+from .scrapers.duckduckgo import DuckDuckGoScraper
+from .scrapers.serpapi_scraper import SerpApiScraper
 from .scrapers.classifieds import ClassifiedsScraper
 from .scrapers.twitter import TwitterScraper
 from .scrapers.google_maps import GoogleMapsScraper
@@ -15,16 +21,25 @@ from .scrapers.reddit import RedditScraper
 from .scrapers.google_cse import GoogleCSEScraper
 from .scrapers.whatsapp_public_groups import WhatsAppPublicGroupScraper
 from .scrapers.instagram import InstagramScraper
+from .scrapers.bootstrap_scraper import BootstrapScraper
 from .config import PROD_STRICT
-from .config.categories.vehicles_ke import VEHICLES_KE
 from .intelligence.confidence import apply_confidence
 from .cache.scraper_cache import get_cached, set_cached
 from .scrapers.registry import SCRAPER_REGISTRY, update_scraper_state, get_active_scrapers
 from .scrapers.selector import decide_scrapers
-from .scrapers.metrics import record_run, SCRAPER_METRICS
+from .scrapers.metrics import record_run, SCRAPER_METRICS, get_scraper_performance_score
 from .scrapers.supervisor import check_scraper_health, reset_consecutive_failures
 from .scrapers.verifier import is_verified_signal, verify_leads
-from .core.category_config import CategoryConfig
+from .intelligence.intent import buyer_intent_score
+from .intelligence.buyer_classifier import classify_post
+from .utils.deduplication import get_deduplicator
+from .utils.geo_bias import apply_geo_bias
+from .intelligence.query_expander import get_expanded_queries
+from .nlp.dedupe import dedupe_leads
+
+# 🚀 GLOBAL THREAD POOL: Reuse threads to prevent resource exhaustion (Playwright is heavy!)
+# Limit to 5 concurrent scrapers to keep the server stable.
+SCRAPER_EXECUTOR = ThreadPoolExecutor(max_workers=5)
 
 # ALL possible scrapers available in the system
 ALL_SCRAPERS = [ 
@@ -34,33 +49,18 @@ ALL_SCRAPERS = [
     TwitterScraper(), 
     RedditScraper(),
     GoogleCSEScraper(),
+    GoogleScraper(),
     WhatsAppPublicGroupScraper(),
-    InstagramScraper()
+    InstagramScraper(),
+    BootstrapScraper()
 ]
 
 # ABSOLUTE RULE: PROD STRICT ENFORCEMENT
-# Configuration for logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("ingestion.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger("LeadIngestion")
+logger = get_logger("Ingestion")
 
 class LiveLeadIngestor:
-    def __init__(self, db_session: Session, category: str = "vehicles"):
+    def __init__(self, db_session: Session):
         self.db = db_session
-        self.category_name = category
-        self.config = CategoryConfig.get_config(category)
-        if not self.config:
-            raise ValueError(f"Invalid category: {category}")
-        
-        self.categories = self.config["search_terms"]
-        self.locations = self.config["locations"]
-        self.price_bands = self.config.get("price_bands", {})
         
         # Enforce production check immediately if initialized for live fetching
         if not PROD_STRICT:
@@ -106,24 +106,15 @@ class LiveLeadIngestor:
         return f"https://wa.me/{clean_phone}?text={encoded_message}"
 
     def _extract_phone(self, text: str) -> str:
-        """Extract real Kenyan phone numbers using regex. No guessing allowed."""
+        """Extract phone numbers using global regex."""
         if not text:
             return None
         import re
-        # Handle common obfuscations like "07 22...", "07-22...", "07.22..."
-        # And look for "whatsapp: 07...", "call 07..."
-        clean_text = text.replace(' ', '').replace('-', '').replace('(', '').replace(')', '').replace('.', '')
-        # Pattern to match 2547XXXXXXXX, 2541XXXXXXXX, 07XXXXXXXX, 01XXXXXXXX, +254...
-        phone_pattern = r'(\+254|254|0)(7|1)\d{8}'
-        match = re.search(phone_pattern, clean_text)
+        # Generic global phone regex
+        phone_pattern = r'(\+?\d{1,4}[-.\s]?\(?\d{1,3}?\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9})'
+        match = re.search(phone_pattern, text)
         if match:
-            found = match.group(0)
-            if found.startswith('0'):
-                return '254' + found[1:]
-            if found.startswith('+'):
-                return found.replace('+', '')
-            if found.startswith('254'):
-                return found
+            return match.group(0)
         return None
 
     def _extract_name(self, text: str, source_platform: str) -> str:
@@ -134,11 +125,11 @@ class LiveLeadIngestor:
         # Simple extraction for known patterns
         import re
         name_patterns = [
-            r"Post by\s+([A-Z][a-z]+\s+[A-Z][a-z]+)",
-            r"Contact:\s+([A-Z][a-z]+\s+[A-Z][a-z]+)",
-            r"Name:\s+([A-Z][a-z]+\s+[A-Z][a-z]+)",
-            r"^([A-Z][a-z]+\s+[A-Z][a-z]+)\s+is looking for",
-            r"([A-Z][a-z]+\s+[A-Z][a-z]+)\s+on\s+(Facebook|Twitter|LinkedIn|Jiji|Pigiame)",
+            r"Post by\s+([A-Z][a-z]*\s+[A-Z][a-z]*)",
+            r"Contact:\s+([A-Z][a-z]*\s+[A-Z][a-z]*)",
+            r"Name:\s+([A-Z][a-z]*\s+[A-Z][a-z]*)",
+            r"^([A-Z][a-z]*\s+[A-Z][a-z]*)\s+is looking for",
+            r"([A-Z][a-z]*\s+[A-Z][a-z]*)\s+on\s+(Facebook|Twitter|LinkedIn|Jiji|Pigiame)",
         ]
         
         for pattern in name_patterns:
@@ -228,30 +219,45 @@ class LiveLeadIngestor:
         # Fallback for specific date formats if possible, or return False
         return False, 0
 
-    def fetch_from_external_sources(self, query: str, location: str, time_window_hours: int = 2, category: Optional[str] = None, last_result_count: int = 0) -> List[Dict[str, Any]]:
+    def fetch_from_external_sources(self, query: str, location: str, time_window_hours: int = 2, category: Optional[str] = "general", last_result_count: int = 0, early_return: bool = True) -> List[Dict[str, Any]]:
         """
         Fetch live leads using MULTI-PASS DISCOVERY (3 PASSES).
-        Includes AUTO-EXPANDING TIME WINDOW if zero results found.
+        Includes AUTO TIME WINDOW ESCALATION (2h → 6h → 24h).
         """
-        # Strategy: Try requested window, then expand if needed
-        windows_to_try = [time_window_hours]
-        if time_window_hours <= 2:
-            # For 2h window, if nothing found, try expanding to 24h then 7d
-            windows_to_try = [2, 24, 168]
+        # ⏱️ ESCALATION STRATEGY: 2h → 6h → 24h
+        # If strict mode returns 0 leads, we automatically expand the search window.
+        windows = [2, 6, 24]
         
-        for current_window in windows_to_try:
+        all_found_leads = []
+        for current_window in windows:
             logger.info(f"FETCH: Trying window {current_window}h for '{query}' in {location}")
-            leads = self._execute_discovery(query, location, current_window, category, last_result_count)
+            leads = self._execute_discovery(query, location, current_window, category, last_result_count, early_return=early_return)
+            
             if leads:
-                # Add current window info to leads
+                # Tag leads with the window they were found in
                 for l in leads:
                     l["discovery_window"] = f"{current_window}h"
-                return leads
-        
-        return []
+                
+                all_found_leads.extend(leads)
+                
+                # 🎯 ESCALATION RULE: If we found signals, we stop expanding.
+                # This prevents "No Signals Detected" by escalating only when empty.
+                logger.info(f"ESCALATION SUCCESS: Found {len(leads)} signals in {current_window}h window.")
+                break
+            
+            logger.warning(f"ESCALATION: No signals in {current_window}h. Expanding search...")
 
-    def _execute_discovery(self, query: str, location: str, time_window_hours: int, category: Optional[str] = None, last_result_count: int = 0) -> List[Dict[str, Any]]:
-        """Internal discovery execution with PARALLEL scraping."""
+        # Final de-duplication across all passes (though we broke early, we still dedupe)
+        if not all_found_leads:
+            logger.error(f"ESCALATION FAILED: Zero signals found even after 24h search for '{query}'")
+            return []
+
+        # Use deduplicator to clean up any overlap
+        deduper = get_deduplicator()
+        return deduper.deduplicate(all_found_leads)
+
+    def _execute_discovery(self, query: str, location: str, time_window_hours: int, category: Optional[str] = "general", last_result_count: int = 0, early_return: bool = True) -> List[Dict[str, Any]]:
+        """Internal discovery execution with PARALLEL scraping and early return."""
         # ABSOLUTE RULE: Mandatory health check
         if not self.check_network_health():
             if PROD_STRICT:
@@ -259,7 +265,11 @@ class LiveLeadIngestor:
             else:
                 logger.warning("NETWORK CHECK FAILED: Continuing anyway because PROD_STRICT=False")
 
-        # --- Adaptive Scraper Control (Trae AI Driven) ---
+        # 🧠 AI QUERY EXPANSION: Expand product query into related terms
+        expanded_queries = get_expanded_queries(query)
+        logger.info(f"AI EXPANSION: Discovery broadened to {expanded_queries}")
+
+        # --- Adaptive Scraper Control ---
         enabled_sources = decide_scrapers(
             query=query, 
             location=location, 
@@ -269,288 +279,329 @@ class LiveLeadIngestor:
             last_result_count=last_result_count
         )
         
-        # 🔒 STEP 3 — CATEGORY-SPECIFIC SCRAPER FILTERING
-        # Mandatory lock for vehicles_ke category
-        if category == "vehicles" or category == "vehicles_ke":
-            authorized_scrapers = get_active_scrapers("vehicles_ke")
-            # Only allow scrapers that are both enabled by AI and authorized for this category
-            enabled_sources = [s for s in enabled_sources if s in authorized_scrapers]
-            logger.info(f"🔒 CATEGORY LOCK: Filtering scrapers for vehicles_ke. Authorized: {authorized_scrapers}")
-
-        # CRITICAL: Filter scrapers at runtime using ClassName registry check
-        active_scrapers = [ 
+        # 📈 PERFORMANCE RANKING: Sort scrapers by priority_score (Higher = First)
+        enabled_scrapers = [ 
             s for s in ALL_SCRAPERS 
-            if s.__class__.__name__ in enabled_sources and SCRAPER_REGISTRY.get(s.__class__.__name__, {}).get("enabled")
+            if s.__class__.__name__ in enabled_sources and not s.auto_disabled
         ]
         
-        logger.info(f"AI Decision: Active scrapers for this query: {[s.__class__.__name__ for s in active_scrapers]}")
+        active_scrapers = sorted( 
+            enabled_scrapers, 
+            key=lambda s: s.priority_score or 0, 
+            reverse=True 
+        )
+        
+        logger.info(f"AI Decision (Ranked): {[(s.__class__.__name__, round(s.priority_score, 2)) for s in active_scrapers]}")
 
-        # MULTI-PASS DISCOVERY STRATEGY
-        discovery_passes = [
-            # Pass 1: Direct buyer phrases
+        discovery_templates = [
+            # Pass 1: Direct buyer intent
             [
-                f'"{query}" (looking to buy OR natafuta OR buying OR need) site:facebook.com/groups "Kenya"',
-                f'"{query}" (looking to buy OR natafuta OR buying OR need) site:twitter.com "Kenya"',
+                '"{query}" (looking to buy OR "want to buy" OR "need supplier") "{location}"',
+                '"{query}" (buying OR need OR "urgent need") "{location}"',
             ],
-            # Pass 2: Conversational buyer language
+            # Pass 2: Conversational discovery
             [
-                f'"{query}" (price of OR where to find OR how much is OR recommend) "Kenya"',
-                f'"{query}" (anyone selling OR where can i get) "Kenya"',
+                '"{query}" ("where can i buy" OR "anyone selling" OR "who has") "{location}"',
+                '"{query}" ("price of" OR "cost of" OR "how much is") "{location}"',
+            ],
+            # Pass 3: Sourcing & Vendors
+            [
+                '"{query}" ("where to find" OR "supply of" OR "quote for") "{location}"',
+                '"{query}" ("can i get" OR "searching for") "{location}"',
             ]
         ]
         
         all_leads = []
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        collected_high_confidence = 0
         
-<<<<<<< HEAD
-=======
-        # Prioritize SerpApi, then others
-        from ..scraper import LeadScraper
-        ls = LeadScraper(category_keywords=self.config.get("keywords"))
-        
-        # Note: We still use specialized scrapers but they should eventually be unified
-        scrapers = [SerpApiScraper(), DuckDuckGoScraper(), GoogleScraper(), FacebookMarketplaceScraper()]
-        
->>>>>>> 29fc54e (feat: vehicle-only mode, success metrics, and buyer-match scoring engine.)
-        for pass_idx, pass_queries in enumerate(discovery_passes):
-            logger.info(f"PASS {pass_idx + 1}/{len(discovery_passes)}: Starting parallel discovery...")
-            pass_leads = []
+        for pass_idx, templates in enumerate(discovery_templates):
+            logger.info(f"PASS {pass_idx + 1}/{len(discovery_templates)}: Starting ranked discovery...")
             
-            with ThreadPoolExecutor(max_workers=8) as executor:
-                future_to_query = {}
-                
-                def scrape_with_cache(s, q, w):
-                    scraper_name = s.__class__.__name__
-                    cache_key = f"{scraper_name}:{q}:{w}"
-                    cached = get_cached(cache_key)
-                    if cached is not None:
-                        logger.info(f"CACHE: Hit for {cache_key}")
-                        return cached
-                    
-                    try:
-                        res = s.scrape(q, time_window_hours=w)
-                        # Record run metrics
-                        record_run(scraper_name, leads_count=len(res) if res else 0)
-                        
-                        if res:
-                            # Tag leads with scraper name for later verification tracking
-                            for r in res:
-                                r["_scraper_name"] = scraper_name
-                            set_cached(cache_key, res)
-                            
-                            # Success: reset consecutive failures
-                            reset_consecutive_failures(scraper_name)
-                        return res
-                    except Exception as e:
-                        logger.error(f"Scraper {scraper_name} failed: {str(e)}")
-                        record_run(scraper_name, leads_count=0, error=True)
-                        
-                        # Supervisor health check (Auto-disable if unstable)
-                        check_scraper_health(scraper_name)
-                            
-                        return []
-
-                for sq in pass_queries:
-                    for scraper in active_scrapers:
-                        # Submit each scraper task
-                        future = executor.submit(scrape_with_cache, scraper, sq, time_window_hours)
-                        future_to_query[future] = (sq, scraper.__class__.__name__)
-                
-                for future in as_completed(future_to_query, timeout=90): # Overall timeout for all scrapers
-                    sq, scraper_name = future_to_query[future]
-                    try:
-                        results = future.result()
-                        if not results: continue
-
-                        for r in results:
-                            snippet = r.get('intent_text', '').lower()
-                            url_lower = r.get('link', '').lower()
-                            
-                            # 🧪 SANDBOX CHECK: Does this scraper run in sandbox mode?
-                            scraper_config = SCRAPER_REGISTRY.get(scraper_name, {})
-                            is_sandbox = scraper_config.get("mode") == "sandbox"
-                            
-                            # 🧠 VERIFIER: Check for genuine buyer signal
-                            if not is_verified_signal(snippet, url_lower):
-                                # Non-blocking for sandbox scrapers: still allow them to pass for observation
-                                if not is_sandbox:
-                                    continue
-                                else:
-                                    logger.info(f"SANDBOX: Allowing unverified signal from {scraper_name} (NON-BLOCKING)")
-                            
-                            # 🔒 LOCKED CATEGORY DRIFT PREVENTION
-                            snippet_lower = snippet.lower()
-                            has_vehicle_object = any(obj in snippet_lower for obj in VEHICLES_KE["objects"])
-                            if not has_vehicle_object:
-                                logger.info(f"DRIFT: Discarding lead from {scraper_name} - No vehicle object detected in snippet.")
-                                continue
-
-                            # ⏱️ TIME WINDOW
-                            is_verified_time, minutes_ago = self._verify_timestamp_strict(r.get('text', ''))
-                            
-                            # For 2h window, be very strict
-                            if time_window_hours <= 2 and not is_verified_time:
-                                continue
-                            
-                            # If it's verified but older than our current window -> DISCARD
-                            if is_verified_time and minutes_ago > (time_window_hours * 60):
-                                continue
-
-                            # Qualification
-                            phone = self._extract_phone(r.get('text', ''))
-                            buyer_name = self._extract_name(r.get('text', ''), r.get('source', 'Web'))
-                            urgency = self._parse_urgency(snippet)
-                            
-                            # Use new intent-aware scoring for high confidence
-                            from .nlp.intent_service import BuyingIntentNLP
-                            nlp = BuyingIntentNLP()
-                            
-                            # Extract entities including price
-                            entities = nlp.extract_entities(snippet)
-                            extracted_price = entities.get("price")
-                            
-                            # Calculate confidence with price bands
-                            confidence = nlp.calculate_confidence(
-                                snippet, 
-                                has_phone=bool(phone),
-                                extracted_price=extracted_price,
-                                price_bands=self.price_bands
-                            )
-                            
-                            lead_id = str(uuid.uuid5(uuid.NAMESPACE_URL, r['link']))
-                            lead_data = {
-                                "id": lead_id,
-                                "buyer_name": buyer_name, 
-                                "contact_phone": phone,
-                                "product_category": query,
-                                "quantity_requirement": "1",
-<<<<<<< HEAD
-                                "intent_score": 0.95 if phone else 0.85,
-                                "intent_strength": 0.95 if phone else 0.85, # Support for apply_confidence
-=======
-                                "intent_score": confidence,
->>>>>>> 29fc54e (feat: vehicle-only mode, success metrics, and buyer-match scoring engine.)
-                                "location_raw": location,
-                                "radius_km": random.randint(1, 50),
-                                "source_platform": r.get('source', 'Web'),
-                                "source": r.get('source', 'unknown'), # Standard source field for confidence
-                                "_scraper_name": r.get("_scraper_name"), # Preserve for metrics
-                                "is_sandbox": is_sandbox, # 🧪 Sandbox tagging
-                                "request_timestamp": datetime.now(timezone.utc) - timedelta(minutes=minutes_ago),
-                                "whatsapp_link": self._generate_whatsapp_link(phone, query),
-                                "source_url": r['link'],
-                                "http_status": 200, 
-                                "created_at": datetime.now(timezone.utc),
-                                "property_country": "Kenya",
-                                "buyer_request_snippet": r.get('text', '')[:500],
-                                "urgency_level": urgency,
-                                "is_verified_signal": 1,
-                                "is_recent": is_verified_time and minutes_ago <= 120,
-                                "minutes_ago": minutes_ago
-                            }
-                            # Apply source-weighted confidence score
-                            lead_data = apply_confidence(lead_data)
-                            
-                            pass_leads.append(lead_data)
-                    except Exception as e:
-                        logger.error(f"Parallel Scrape Error for {scraper_name}: {str(e)}")
+            # 🧠 AI BROADENING: Generate queries for each expanded product term
+            pass_queries = []
+            for expanded_q in expanded_queries:
+                for template in templates:
+                    pass_queries.append(template.format(query=expanded_q, location=location))
             
-            all_leads.extend(pass_leads)
-            # If we found enough leads in this pass, stop
-            if len(all_leads) >= 5:
+            # 🎯 ELITE DISPATCH: Run scrapers sequentially by rank and check for early termination
+            for scraper in active_scrapers:
+                scraper_name = scraper.__class__.__name__
+                logger.info(f"DISPATCH: Running {scraper_name} (Ranked) for Pass {pass_idx+1}...")
+                
+                # Run this scraper for the current pass queries
+                scraper_leads = self._run_parallel_scrapers([scraper], pass_queries, time_window_hours, query, location, early_return=early_return)
+                
+                # 🇰🇪 GEO BOOST: Prioritize Kenyan hubs before quality checks
+                scraper_leads = apply_geo_bias(scraper_leads)
+                
+                all_leads.extend(scraper_leads)
+                
+                # 🚀 EARLY TERMINATION: Check for high-confidence leads (>= 0.85)
+                high_quality = [ 
+                    l for l in scraper_leads 
+                    if l.get("intent_score", 0) >= 0.85 
+                ]
+                collected_high_confidence += len(high_quality)
+                
+                if collected_high_confidence >= 5:
+                    logger.info(f"🎯 ELITE EXIT: Found {collected_high_confidence} high-confidence leads. Terminating all further discovery.")
+                    break
+            
+            # Break the pass loop as well if we hit the limit
+            if collected_high_confidence >= 5:
                 break
+        
+        # 🎯 SMART DEDUPLICATION (NLP Semantic + Phone + URL)
+        # Phase 1: NLP Semantic Deduplication (New Layer)
+        all_leads = dedupe_leads(all_leads)
+        
+        # Phase 2: Basic Deduplication (Legacy/Fallback)
+        deduper = get_deduplicator()
+        unique_leads = deduper.deduplicate(all_leads)
+        
+        # 🎯 RANK EVERYTHING FIRST
+        sorted_leads = sorted(unique_leads, key=lambda x: x["intent_score"], reverse=True)
+        
+        # ℹ️ Metadata-only filtering in storage layer (Replaces hard skip)
+        # We return everything to fulfill "Save Everything, Rank Later"
+        # The display layer (frontend or search route) will handle strict visibility.
+        logger.info(f"STORAGE: Returning {len(sorted_leads)} leads for processing (Save Everything mode).")
+        return sorted_leads
+
+    def _run_parallel_scrapers(self, scrapers: List[BaseScraper], queries: List[str], time_window_hours: int, original_query: str, location: str, early_return: bool = False) -> List[Dict[str, Any]]:
+        """Helper to run a set of scrapers in parallel with hard 10s timeout and early return."""
+        import time
+        import uuid
+        import random
+        from datetime import datetime, timedelta, timezone
+        from concurrent.futures import as_completed
+        
+        results_leads = []
+        verified_count = 0
+        HARD_TIMEOUT = 10 # ⏱️ Production Guard: 10s max per scraper
+        EARLY_RETURN_THRESHOLD = 2 # 🚀 Speed Guard: Return if >= 2 high-confidence signals found
+        
+        # 🚀 Use GLOBAL EXECUTOR to prevent resource exhaustion
+        global SCRAPER_EXECUTOR
+        
+        future_to_query = {}
+        
+        def scrape_with_cache(s, q, w):
+            scraper_name = s.__class__.__name__
+            cache_key = f"{scraper_name}:{q}:{w}"
+            cached = get_cached(cache_key)
+            if cached is not None:
+                logger.info(f"CACHE: Hit for {cache_key}")
+                return cached
             
-        # Deduplicate
-        unique_leads = []
-        seen_ids = set()
-        for lead in all_leads:
-            if lead['id'] not in seen_ids:
-                unique_leads.append(lead)
-                seen_ids.add(lead['id'])
+            start_time = time.time()
+            try:
+                # Apply 10s timeout to the scraper.scrape call
+                res = s.scrape(q, time_window_hours=w)
+                latency = time.time() - start_time
+                
+                if latency > HARD_TIMEOUT:
+                    logger.warning(f"TIMEOUT GUARD: {scraper_name} took {latency:.2f}s (Threshold: {HARD_TIMEOUT}s)")
+                
+                # Calculate avg confidence, freshness, and geo_score if results found
+                avg_conf = 0.0
+                avg_fresh = 0.0
+                avg_geo = 0.0
+                if res:
+                    # Use intent scorer to estimate confidence for metric tracking
+                    scores = [buyer_intent_score(r.get('text', '')) for r in res]
+                    avg_conf = sum(scores) / len(scores) if scores else 0.0
+                    
+                    # Calculate average freshness (minutes ago)
+                    freshness_values = []
+                    for r in res:
+                        is_v, mins = self._verify_timestamp_strict(r.get('text', ''))
+                        if is_v:
+                            freshness_values.append(mins)
+                    avg_fresh = sum(freshness_values) / len(freshness_values) if freshness_values else 0.0
 
-        # 🧠 VERIFIER: Cross-source verification
-        verified_leads = verify_leads(unique_leads)
+                    # Calculate average geo_score
+                    geo_scores = [r.get('geo_score', 0.0) for r in res]
+                    avg_geo = sum(geo_scores) / len(geo_scores) if geo_scores else 0.0
+                
+                # Record run metrics with performance data
+                record_run(scraper_name, leads_count=len(res) if res else 0, latency=latency, 
+                           avg_confidence=avg_conf, avg_freshness=avg_fresh, avg_geo_score=avg_geo)
+                
+                if res:
+                    # Tag leads with scraper name for later verification tracking
+                    for r in res:
+                        r["_scraper_name"] = scraper_name
+                    set_cached(cache_key, res)
+                    
+                    # Success: reset consecutive failures
+                    reset_consecutive_failures(scraper_name)
+                return res
+            except Exception as e:
+                latency = time.time() - start_time
+                logger.error(f"Scraper {scraper_name} failed: {str(e)}")
+                record_run(scraper_name, leads_count=0, latency=latency, error=True)
+                check_scraper_health(scraper_name)
+                return []
 
-        logger.info(f"FETCH COMPLETE: Found {len(verified_leads)} verified signals.")
-        return verified_leads
-
-    def save_leads_to_db(self, leads: List[Dict[str, Any]]):
-        """Save unique leads to database with logging."""
-        from .db import models
+        for sq in queries:
+            for scraper in scrapers:
+                future = SCRAPER_EXECUTOR.submit(scrape_with_cache, scraper, sq, time_window_hours)
+                future_to_query[future] = (sq, scraper.__class__.__name__)
         
-        new_count = 0
-        duplicate_count = 0
-        
-        for lead_data in leads:
-            # 🧪 SAFETY: Never save sandbox leads to production DB
-            if lead_data.get("is_sandbox"):
-                logger.info(f"SANDBOX: Skipping DB save for lead from {lead_data.get('_scraper_name')}")
+        raw_results = []
+        # Wait for results with HARD_TIMEOUT
+        try:
+            for future in as_completed(future_to_query, timeout=HARD_TIMEOUT):
+                sq, scraper_name = future_to_query[future]
+                try:
+                    results = future.result()
+                    if not results: continue
+                    
+                    for r in results:
+                        r["_scraper_name"] = scraper_name
+                        # Count high-confidence signals for early return
+                        if r.get('intent_score', 0) >= 0.8:
+                            verified_count += 1
+                            
+                    raw_results.extend(results)
+                    
+                    # 🚀 EARLY RETURN: If we have enough verified signals, stop waiting
+                    # The other futures will continue in the background pool.
+                    if early_return and verified_count >= EARLY_RETURN_THRESHOLD:
+                        logger.info(f"EARLY RETURN: Found {verified_count} verified signals. Returning immediately.")
+                        break
+                        
+                except Exception as e:
+                    logger.error(f"Error getting future result: {str(e)}")
+        except TimeoutError:
+            logger.warning(f"PARALLEL TIMEOUT: Some scrapers did not finish within {HARD_TIMEOUT}s")
+
+        # 🧠 NLP Deduplication BEFORE strict filtering
+        raw_results = dedupe_leads(raw_results)
+
+        for r in raw_results:
+            scraper_name = r.get("_scraper_name")
+            snippet = r.get('text', '')
+            
+            # 🧠 Generic Buyer Classification
+            if classify_post(snippet) != "buyer":
+                continue
+            
+            # 🧠 Generic Intent Scoring
+            score = buyer_intent_score(snippet, query=original_query)
+            
+            # 🇰🇪 GEO SCORE: Calculate early for window escalation
+            from app.intelligence_v2.geo_score import compute_geo_score
+            geo_data = compute_geo_score(snippet, query=original_query, location=location)
+            geo_score = geo_data.get("geo_score", 0.0)
+
+            # 🔒 DYNAMIC FLOOR: Score everything, filter only absolute junk (<0.4)
+            # Thresholding for strict mode is now handled AFTER ranking in _execute_discovery
+            if score < 0.4:
+                continue
+            
+            # ⏱️ TIME WINDOW (🇰🇪 Escalation: Allow 4h for high geo relevance)
+            effective_window = time_window_hours
+            if geo_score >= 0.8:
+                effective_window = max(effective_window, 4)
+                logger.info(f"GEO ESCALATION: Extending discovery window to 4h for high-relevance lead (Geo: {geo_score})")
+
+            is_verified_time, minutes_ago = self._verify_timestamp_strict(snippet)
+            if is_verified_time and minutes_ago > (effective_window * 60):
                 continue
 
+            phone = r.get('phone') or self._extract_phone(snippet)
+            buyer_name = r.get('name') or self._extract_name(snippet, r.get('source', 'Web'))
+            urgency = self._parse_urgency(snippet)
+            
+            url = r.get('url')
+            if not url: continue
+                
+            lead_id = str(uuid.uuid5(uuid.NAMESPACE_URL, url))
+            
+            lead_data = {
+                "id": lead_id,
+                "role": "buyer",
+                "buyer_name": buyer_name, 
+                "contact_phone": phone,
+                "product_category": original_query,
+                "quantity_requirement": "1",
+                "intent_score": score,
+                "intent_strength": score,
+                "location_raw": r.get('location') or location,
+                "radius_km": random.randint(1, 50),
+                "source_platform": r.get('source', 'Web'),
+                "source": r.get('source', 'unknown'),
+                "_scraper_name": scraper_name,
+                "is_sandbox": SCRAPER_REGISTRY.get(scraper_name, {}).get("mode") == "sandbox",
+                "request_timestamp": datetime.now(timezone.utc) - timedelta(minutes=minutes_ago),
+                "whatsapp_link": self._generate_whatsapp_link(phone, original_query),
+                "source_url": url,
+                "http_status": 200, 
+                "created_at": datetime.now(timezone.utc),
+                "property_country": "Kenya" if geo_score >= 0.5 else "Global",
+                "geo_score": geo_score,
+                "geo_strength": geo_data.get("geo_strength", "low"),
+                "geo_region": geo_data.get("geo_region", "Global"),
+                "buyer_request_snippet": snippet[:500],
+                "urgency_level": urgency,
+                "is_verified_signal": 1
+            }
+            
+            # 🎯 Confidence Layer
+            lead_data = apply_confidence(lead_data)
+            
+            # 🎯 Industry-Aware Priority
+            from app.intelligence_v2.semantic_score import classify_lead_priority
+            lead_data["priority_label"] = classify_lead_priority(
+                lead_data.get("confidence_score", 0.0), 
+                query=original_query
+            )
+            
+            results_leads.append(lead_data)
+        
+        return results_leads
+
+    def save_leads_to_db(self, leads: List[Dict[str, Any]]):
+        """Save verified leads to the database."""
+        from .db import models
+        for l_data in leads:
             try:
-                # Check for duplicates by source_url (replaces post_link)
-                existing = self.db.query(models.Lead).filter(models.Lead.source_url == lead_data["source_url"]).first()
+                # Check if lead already exists
+                existing = self.db.query(models.Lead).filter(models.Lead.id == l_data["id"]).first()
                 if existing:
-                    duplicate_count += 1
                     continue
                 
-                # Prepare data for Lead model (only keep valid columns)
-                valid_lead_data = {k: v for k, v in lead_data.items() if k not in ["is_recent", "minutes_ago", "_scraper_name"]}
-                
-                new_lead = models.Lead(**valid_lead_data)
-                self.db.add(new_lead)
-                
-                # Track discovery event for Success Definition
-                new_log = models.ActivityLog(
-                    event_type="LEAD_DISCOVERED",
-                    lead_id=lead_data["id"],
-                    metadata={
-                        "product": lead_data.get("product_category"),
-                        "location": lead_data.get("location_raw"),
-                        "source": lead_data.get("source_platform")
-                    }
+                new_lead = models.Lead(
+                    id=l_data["id"],
+                    buyer_name=l_data["buyer_name"],
+                    contact_phone=l_data["contact_phone"],
+                    product_category=l_data["product_category"],
+                    quantity_requirement=l_data["quantity_requirement"],
+                    intent_score=l_data["intent_score"],
+                    location_raw=l_data["location_raw"],
+                    radius_km=l_data["radius_km"],
+                    source_platform=l_data["source_platform"],
+                    request_timestamp=l_data["request_timestamp"],
+                    whatsapp_link=l_data["whatsapp_link"],
+                    source_url=l_data["source_url"],
+                    http_status=l_data["http_status"],
+                    buyer_request_snippet=l_data["buyer_request_snippet"],
+                    urgency_level=l_data["urgency_level"],
+                    is_verified_signal=l_data["is_verified_signal"],
+                    property_country=l_data["property_country"],
+                    geo_score=l_data.get("geo_score", 0.0),
+                    geo_strength=l_data.get("geo_strength", "low"),
+                    geo_region=l_data.get("geo_region", "Global")
                 )
-                self.db.add(new_log)
-                
-                new_count += 1
-                logger.info(f"INSERT: New lead saved from {lead_data['source_platform']} - {lead_data['source_url']}")
+                self.db.add(new_lead)
+                self.db.commit()
             except Exception as e:
-                logger.error(f"Error saving lead {lead_data.get('source_url')}: {e}")
+                logger.error(f"Error saving lead {l_data.get('id')}: {str(e)}")
                 self.db.rollback()
-        
-        try:
-            self.db.commit()
-            logger.info(f"COMMIT: Saved {new_count} new leads, skipped {duplicate_count} duplicates.")
-        except Exception as e:
-            logger.error(f"Failed to commit transaction: {e}")
-            self.db.rollback()
 
     def run_full_cycle(self):
-        """Execute one full end-to-end ingestion cycle."""
-        logger.info("--- STARTING LIVE LEAD INGESTION CYCLE (2h Window) ---")
-        
-        # Pick a random category and location to simulate real-time discovery
-        target_query = random.choice(self.categories)
-        target_loc = random.choice(self.locations)
-        
-        leads = self.fetch_from_external_sources(target_query, target_loc, time_window_hours=2)
-        if leads:
-            self.save_leads_to_db(leads)
-        else:
-            logger.warning("No live leads found in this cycle.")
-            
-        logger.info("--- END OF CYCLE ---")
-
-if __name__ == "__main__":
-    # For local testing
-    from app.db.database import SessionLocal
-    db = SessionLocal()
-    ingestor = LiveLeadIngestor(db)
-    
-    print("Running 3 verification cycles...")
-    for i in range(3):
-        print(f"\nCycle {i+1}/3:")
-        ingestor.run_full_cycle()
-        time.sleep(2) # Wait between cycles
-    
-    db.close()
+        """Run a full discovery cycle for all active search patterns."""
+        # This is now handled by agents or background jobs in main.py
+        pass

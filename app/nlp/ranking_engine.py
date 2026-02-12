@@ -8,12 +8,13 @@ class RankingEngine:
             "distance": 0.2
         }
 
-    def calculate_rank(self, intent_score, timestamp, distance_km=None, max_distance=50):
+    def calculate_rank(self, intent_score, timestamp, distance_km=None, max_distance=50, geo_score=0.0):
         """
         Calculate a final rank score (0-1) for a lead.
         - intent_score: 0 to 1
         - timestamp: datetime object
         - distance_km: distance in km from search center
+        - geo_score: 0.0 to 1.0 geographic relevance (Kenya First)
         """
         # 1. Freshness Score (Last 72 hours)
         age_hours = (datetime.utcnow() - timestamp).total_seconds() / 3600
@@ -31,7 +32,10 @@ class RankingEngine:
             (distance_score * self.weights["distance"])
         )
         
-        return final_score
+        # 4. 🇰🇪 KENYA BOOST: 30% bonus for high geo_score leads
+        final_score *= (1 + (geo_score * 0.3))
+        
+        return round(final_score, 4)
 
     def rank_leads(self, leads, center_coords=None, max_distance=50):
         """Rank a list of leads."""
@@ -42,14 +46,18 @@ class RankingEngine:
         for lead in leads:
             # Calculate distance if center_coords provided
             dist = None
-            if center_coords and lead.latitude and lead.longitude:
+            if center_coords and hasattr(lead, 'latitude') and hasattr(lead, 'longitude') and lead.latitude and lead.longitude:
                 dist = geo.calculate_distance(center_coords, (lead.latitude, lead.longitude))
             
+            # Use geo_score from lead if available (new Intelligence v2 field)
+            geo_score = getattr(lead, "geo_score", 0.0) or 0.0
+            
             rank = self.calculate_rank(
-                lead.intent_score,
-                lead.created_at,
+                lead.intent_score or 0.0,
+                lead.created_at or datetime.utcnow(),
                 distance_km=dist,
-                max_distance=max_distance
+                max_distance=max_distance,
+                geo_score=geo_score
             )
             
             # Add rank to lead data (converted to dict for API)

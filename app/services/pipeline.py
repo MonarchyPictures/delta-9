@@ -9,6 +9,7 @@ from ..db import models
 from ..utils.playwright_helpers import get_page_content
 from ..utils.intent_scoring import IntentScorer
 from ..intelligence.verification import verify_leads as cross_source_verify
+from ..config import PIPELINE_MODE, PROD_STRICT, PIPELINE_CATEGORY
 
 logger = logging.getLogger(__name__)
 
@@ -41,57 +42,61 @@ class LeadPipeline:
 
     def process_raw_lead(self, raw_data: Dict[str, Any]) -> Optional[models.Lead]:
         """
-        Process a single raw lead result from a scraper.
-        Performs validation, scoring, and normalization.
+        Process a single standardized raw lead from a "dumb" scraper.
+        The Engine ("smart") decides if this is a buyer and extracts details.
         """
-        text = raw_data.get('intent_text', '')
-        link = raw_data.get('link', '')
+        text = raw_data.get('text', '')
+        url = raw_data.get('url', '')
         
-        if not text or not link:
+        if not text or not url:
             return None
 
-        # 1. Intent Validation
+        # 1. Intent Validation (Smart Engine Decision)
         if not self.scorer.validate_lead(text):
-            logger.debug(f"Lead rejected by validation: {link}")
+            logger.debug(f"Lead rejected by engine validation: {url}")
             return None
 
-        # 2. Scoring & Readiness
-        intent_score = raw_data.get('confidence_score') or self.scorer.calculate_intent_score(text)
+        # 2. Scoring & Readiness (Smart Engine Logic)
+        intent_score = self.scorer.calculate_intent_score(text)
         readiness_level, readiness_score = self.scorer.analyze_readiness(text)
 
-        # 3. Extraction
-        phone = self._extract_phone(text)
-        buyer_name = self._extract_name(text, raw_data.get('source', 'Web'))
+        # 3. Extraction (Smart Engine Logic)
+        phone = raw_data.get('phone') or self._extract_phone(text)
+        buyer_name = raw_data.get('name') or self._extract_name(text, raw_data.get('source', 'Web'))
         urgency = self._parse_urgency(text)
         
         # 4. Normalization
-        lead_id = str(uuid.uuid5(uuid.NAMESPACE_URL, link))
+        lead_id = str(uuid.uuid5(uuid.NAMESPACE_URL, url))
         
         # Check if exists
-        existing = self.db.query(models.Lead).filter(models.Lead.source_url == link).first()
+        existing = self.db.query(models.Lead).filter(models.Lead.source_url == url).first()
         if existing:
             return None
+
+        # Determine product category dynamically from raw_data or query
+        product_category = raw_data.get('product_category') or PIPELINE_CATEGORY or "General"
 
         lead = models.Lead(
             id=lead_id,
             buyer_name=buyer_name,
             contact_phone=phone,
-            product_category=raw_data.get('product', 'General'),
+            product_category=product_category.capitalize(),
             quantity_requirement="1",
             intent_score=intent_score,
-            location_raw=raw_data.get('location', 'Kenya'),
+            location_raw=raw_data.get('location', 'Global'),
             radius_km=random.randint(1, 50),
             source_platform=raw_data.get('source', 'Web'),
-            request_timestamp=datetime.now(timezone.utc), # Simplification for now
-            whatsapp_link=self._generate_whatsapp_link(phone, raw_data.get('product', 'Product')),
-            contact_method=raw_data.get('contact_method'),
-            source_url=link,
+            request_timestamp=datetime.now(timezone.utc),
+            whatsapp_link=self._generate_whatsapp_link(phone, product_category),
+            contact_method="WhatsApp" if phone else "Needs Outreach",
+            source_url=url,
             http_status=200,
             created_at=datetime.now(timezone.utc),
-            property_country="Kenya",
+            property_country="Global",
             buyer_request_snippet=text[:500],
             urgency_level=urgency,
-            is_verified_signal=1
+            is_verified_signal=1,
+            is_hot_lead=1 if intent_score >= 0.8 else 0
         )
         
         return lead
@@ -112,16 +117,23 @@ class LeadPipeline:
 
     def _extract_phone(self, text: str) -> Optional[str]:
         import re
-        clean_text = text.replace(' ', '').replace('-', '').replace('(', '').replace(')', '').replace('.', '')
-        phone_pattern = r'(\+254|254|0)(7|1)\d{8}'
-        match = re.search(phone_pattern, clean_text)
-        if match:
-            found = match.group(0)
-            if found.startswith('0'):
-                return '254' + found[1:]
-            if found.startswith('+'):
-                return found.replace('+', '')
-            if found.startswith('254'):
+        # Generalized phone extraction: looks for + followed by digits, or common formats
+        # Supports international formats (+1, +44, +254, etc.)
+        phone_patterns = [
+            r'\+(\d{1,3})\s?(\d{3})\s?(\d{3})\s?(\d{3,4})', # +254 712 345 678
+            r'\+(\d{1,15})',                                 # +254712345678
+            r'(?<!\d)(07\d{8}|01\d{8})(?!\d)',               # Kenyan local 07... or 01...
+            r'(?<!\d)(\d{10,15})(?!\d)'                      # Long digit strings
+        ]
+        
+        for pattern in phone_patterns:
+            match = re.search(pattern, text)
+            if match:
+                found = match.group(0).replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+                if found.startswith('0') and len(found) == 10:
+                    return '254' + found[1:]
+                if found.startswith('+'):
+                    return found.replace('+', '')
                 return found
         return None
 

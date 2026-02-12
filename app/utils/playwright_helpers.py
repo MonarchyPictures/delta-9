@@ -8,6 +8,7 @@ def get_page_content(url, wait_selector=None, user_agent=None):
     Utility to fetch page content using Playwright.
     Handles cookie consent and waiting for selectors.
     """
+    print("Navigating to:", url)
     if not user_agent:
         user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
         
@@ -44,18 +45,33 @@ def get_page_content(url, wait_selector=None, user_agent=None):
                     except:
                         pass
                 
+                # 📜 Scroll to Load More Content (Handles lazy-loading)
+                print(f"Scrolling to load content for {url}...")
+                for i in range(3):
+                    page.evaluate("window.scrollBy(0, window.innerHeight)")
+                    page.wait_for_timeout(3000) # wait for content to load
+
                 if wait_selector:
                     try:
-                        page.wait_for_selector(wait_selector, timeout=10000)
-                    except:
-                        logger.warning(f"PLAYWRIGHT: Timeout waiting for selector {wait_selector}")
+                        # Primary selector
+                        page.wait_for_selector(wait_selector, timeout=15000)
+                    except Exception as e:
+                        print(f"Primary selector '{wait_selector}' failed, trying fallback...")
+                        try:
+                            # Fallback for dynamic layout
+                            page.wait_for_selector("[role='main'], [role='presentation'], .main-content, #main", timeout=15000)
+                        except Exception as fe:
+                            print("PLAYWRIGHT ERROR (fallback):", str(fe))
+                            logger.warning(f"PLAYWRIGHT: Both primary and fallback selectors failed at {url}")
                 
                 return page.content()
             except Exception as e:
+                print("PLAYWRIGHT ERROR (page_op):", str(e))
                 logger.error(f"PLAYWRIGHT: Page operation error at {url}: {str(e)}")
                 return None
             finally:
                 browser.close()
     except Exception as e:
+        print("PLAYWRIGHT ERROR (browser_launch):", str(e))
         logger.error(f"PLAYWRIGHT: Browser launch/context error: {str(e)}")
         return None

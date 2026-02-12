@@ -2,22 +2,14 @@ import logging
 import re
 from typing import Dict, Any, List, Optional
 from .metrics import record_verified, CATEGORY_STATS, record_category_lead
-from ..config.categories.vehicles_ke import VEHICLES_KE
 from ..core.pipeline_mode import BOOTSTRAP_RULES, PIPELINE_MODE
+
+from ..intelligence.intent import BUYER_PATTERNS, buyer_intent_score
 
 logger = logging.getLogger("ScraperVerifier")
 
 # 🔒 PRODUCTION OVERRIDE: VERIFIED OUTBOUND SIGNALS
-MANDATORY_BUYER_SIGNALS = [
-    "looking to buy", "need to buy", "anyone selling?", 
-    "where can i get", "i want to purchase", "need asap", 
-    "need urgently", "budget is", "ready to pay", "dm me prices",
-    "natafuta", "price of", "where to find", "how much is",
-    "looking for", "recommend a", "suggest a", "how much",
-    "price?", "inbox price", "available?", "where in",
-    "selling this?", "want this", "i need", "contact of",
-    "who has", "supplier of", "buying", "interested in buying"
-]
+MANDATORY_BUYER_SIGNALS = BUYER_PATTERNS
 
 # 🚫 HARD EXCLUSIONS
 SELLER_KEYWORDS = [
@@ -38,16 +30,15 @@ SELLER_KEYWORDS = [
 
 BUSINESS_URL_INDICATORS = [
     "/shop/", "/product/", "/catalog/", "/store/", "/business/", 
-    "jiji.co.ke", "pigiame.co.ke", "kupatana.com", "my-store", 
-    "shopify", "woocommerce", "official", "corporate", "co.ke/shop"
+    "shopify", "woocommerce", "official", "corporate"
 ]
 
 TRUSTED_SOURCES = { 
     "google_maps", 
-    "jiji_kenya", 
+    "classifieds", 
     "facebook_marketplace",
     "GoogleMapsScraper",
-    "JijiKenyaScraper",
+    "ClassifiedsScraper",
     "FacebookMarketplaceScraper"
 }
 
@@ -63,7 +54,9 @@ def is_verified_signal(text: str, url: str = "") -> bool:
         if not any(bs in snippet for bs in MANDATORY_BUYER_SIGNALS):
             return False
 
-    return any(bs in snippet for bs in MANDATORY_BUYER_SIGNALS)
+    # 🎯 Generic Intent Engine Rule: 0.4 Threshold
+    score = buyer_intent_score(text)
+    return score >= 0.4
 
 def adaptive_threshold(category: str, base: float = 0.85, loosen_factor: float = 0.0) -> float:
     """
@@ -72,10 +65,6 @@ def adaptive_threshold(category: str, base: float = 0.85, loosen_factor: float =
     Low success rate -> Higher threshold (stricter verification)
     loosen_factor: amount to decrease threshold (e.g. 0.1 for 10% lower)
     """
-    # 🔒 LOCKED CATEGORY FLOOR: Use VEHICLES_KE floor as base if category matches
-    if category.lower() in [VEHICLES_KE["category"]] + VEHICLES_KE["objects"]:
-        base = VEHICLES_KE["confidence_floor"]
-    
     # 🧪 BOOTSTRAP OVERRIDE: Use lower floor locally
     if PIPELINE_MODE == "bootstrap":
         base = min(base, BOOTSTRAP_RULES["min_confidence"])
@@ -134,11 +123,17 @@ def verify_leads(leads: List[Dict[str, Any]], loosen: bool = False) -> List[Dict
             # 3. Cross-Source Check
             has_cross_match = len(all_sources) >= 2
             
+            # 4. Buyer-First Trust (NEW: trust ingestion gate)
+            is_confirmed_buyer = lead.get("role") == "buyer"
+            
             # Verification Decision
             is_verified = False
             reason = "unverified"
             
-            if is_trusted: 
+            if is_confirmed_buyer:
+                is_verified = True
+                reason = "confirmed_buyer_role"
+            elif is_trusted: 
                 is_verified = True
                 reason = "trusted_source" 
             elif meets_threshold:

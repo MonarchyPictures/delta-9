@@ -6,8 +6,9 @@ from app.db.database import SessionLocal
 from app.ingestion import LiveLeadIngestor
 
 def verify_thrice():
-    print("--- PROD_STRICT: Starting 3-cycle pipeline verification ---")
-    os.environ["ENVIRONMENT"] = "production"
+    print("--- PIPELINE: Starting 3-cycle pipeline verification ---")
+    os.environ["PIPELINE_MODE"] = "strict"
+    os.environ["PIPELINE_CATEGORY"] = "vehicles"
     
     import logging
     logging.getLogger("LeadIngestion").setLevel(logging.DEBUG)
@@ -16,7 +17,7 @@ def verify_thrice():
     ingestor = LiveLeadIngestor(db)
     
     results = []
-    queries = ["water tank", "construction", "solar"]
+    queries = ["toyota", "mazda", "truck"]
     
     for i in range(3):
         print(f"\nRUN {i+1}/3...")
@@ -53,8 +54,8 @@ def verify_thrice():
         db.close()
         return False
 
-    print("\n--- PROD_STRICT: PIPELINE VERIFIED ---")
-    print("All 3 runs produced independently fetched results with mandatory metadata.")
+    print("\n--- PIPELINE VERIFIED ---")
+    print("All 3 runs produced independently fetched results for VEHICLES • KENYA.")
     db.close()
     return True
 

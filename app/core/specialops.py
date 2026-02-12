@@ -207,10 +207,10 @@ class SpecialOpsAgent:
                 if scraper_results:
                     for r in scraper_results:
                         all_results.append({
-                            "title": r.get("text", "")[:100],
-                            "body": r.get("text", ""),
-                            "href": r.get("link")
-                        })
+                    "title": r.get("text", "")[:100],
+                    "body": r.get("text", ""),
+                    "url": r.get("url")
+                })
                 
                 # SIGNIFICANT delay to avoid 429
                 time.sleep(random.uniform(5, 12))
@@ -225,7 +225,7 @@ class SpecialOpsAgent:
         filtered = []
         seen_urls = set()
         for r in all_results:
-            url = r.get("href")
+            url = r.get("url")
             if not url or url in seen_urls:
                 continue
                 

@@ -1,53 +1,55 @@
-import React, { useState } from 'react';
-import { User, Plus, Shield, Bell } from 'lucide-react';
-import getApiUrl from '../config';
+import React from 'react';
+import AgentManager from '../components/AgentManager';
+import { Radar } from 'lucide-react';
 
-const Agents = ({ agents, loading, onCreateAgent }) => {
+const Agents = () => {
   return (
-    <div className="flex-1 bg-black p-8 overflow-y-auto">
-      <div className="max-w-6xl mx-auto space-y-8">
-        <div className="flex justify-between items-center">
-          <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase">Market Agents</h1>
-          <button 
-            onClick={onCreateAgent}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-2xl font-bold transition-all shadow-lg shadow-blue-600/20"
-          >
-            <Plus size={20} /> Deploy New Agent
-          </button>
+    <div className="flex-1 bg-black overflow-y-auto pt-20 pb-24">
+      <div className="max-w-4xl mx-auto px-4">
+        <div className="flex items-center gap-3 mb-8">
+          <div className="p-3 bg-blue-600/20 rounded-2xl">
+            <Radar className="h-8 w-8 text-blue-500" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-black text-white tracking-tight uppercase italic">
+              Demand <span className="text-blue-600">Radar</span>
+            </h1>
+            <p className="text-white/40 text-[10px] font-black uppercase tracking-[0.3em]">
+              Autonomous 24/7 Intelligence Agents
+            </p>
+          </div>
+        </div>
+        
+        <div className="bg-surface-secondary/30 backdrop-blur-xl border border-white/5 rounded-3xl p-1">
+          <AgentManager />
         </div>
 
-        {loading ? (
-          <div className="text-center py-20 text-white/20 font-black uppercase tracking-[0.5em] animate-pulse">Consulting Neural Nodes...</div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {agents && agents.length > 0 ? agents.map((agent) => (
-              <div key={agent.id} className="bg-white/5 border border-white/10 rounded-3xl p-6 space-y-4 hover:border-blue-600/50 transition-all group">
-                <div className="flex justify-between items-start">
-                  <div className="w-12 h-12 bg-blue-600/10 rounded-2xl flex items-center justify-center text-blue-500 group-hover:bg-blue-600 group-hover:text-white transition-all">
-                    <Shield size={24} />
-                  </div>
-                  <div className="flex gap-2">
-                     <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${agent.is_active ? 'bg-green-500/10 text-green-500' : 'bg-white/10 text-white/40'}`}>
-                       {agent.is_active ? 'Active' : 'Standby'}
-                     </span>
-                  </div>
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold text-white tracking-tight">{agent.name}</h3>
-                  <p className="text-white/40 text-xs italic">Hunting: {agent.query} in {agent.location}</p>
-                </div>
-                <div className="pt-4 border-t border-white/5 flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-white/40">
-                  <div className="flex items-center gap-2"><Bell size={12}/> Alerts Enabled</div>
-                  <div>Score: {agent.min_intent_score * 100}%</div>
-                </div>
-              </div>
-            )) : (
-              <div className="col-span-full py-20 bg-white/5 border border-white/10 rounded-3xl text-center">
-                <p className="text-white/40 font-bold uppercase tracking-widest">No agents deployed. Start hunting today.</p>
-              </div>
-            )}
+        <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white/5 p-6 rounded-3xl border border-white/5">
+            <h3 className="text-blue-400 font-bold mb-2 flex items-center gap-2">
+              <span className="text-lg">🕒</span> Always On
+            </h3>
+            <p className="text-white/60 text-sm">
+              Agents run every 2 hours to catch new demand before your competitors do.
+            </p>
           </div>
-        )}
+          <div className="bg-white/5 p-6 rounded-3xl border border-white/5">
+            <h3 className="text-green-400 font-bold mb-2 flex items-center gap-2">
+              <span className="text-lg">🚨</span> Instant Alerts
+            </h3>
+            <p className="text-white/60 text-sm">
+              Get notified the second a high-intent buyer is detected in your target location.
+            </p>
+          </div>
+          <div className="bg-white/5 p-6 rounded-3xl border border-white/5">
+            <h3 className="text-purple-400 font-bold mb-2 flex items-center gap-2">
+              <span className="text-lg">📊</span> Data Export
+            </h3>
+            <p className="text-white/60 text-sm">
+              Download your leads as structured .txt files for your CRM or outreach team.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );

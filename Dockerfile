@@ -33,7 +33,8 @@ COPY app/ ./app/
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 # Set environment variables
-ENV DELTA9_ENV=prod
+ENV PIPELINE_MODE=strict
+ENV PIPELINE_CATEGORY=vehicles
 ENV PORT=10000
 
 # Expose the port

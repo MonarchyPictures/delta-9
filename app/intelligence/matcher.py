@@ -1,11 +1,18 @@
 
-def buyer_match_score(vehicle, buyer): 
+from sqlalchemy.orm import Session
+from ..db import models
+from .outreach import generate_message
+import logging
+
+logger = logging.getLogger(__name__)
+
+def buyer_match_score(lead, buyer): 
     """
-    Calculates the match score between a vehicle (lead) and a buyer profile.
+    Calculates the match score between a lead and a buyer profile.
     
     Args:
-        vehicle: An object or dict with .type (or ['product_category']), .price, .location, .urgency_score, .final_score
-        buyer: An object or dict with .vehicle_type, .budget_min, .budget_max, .location, .urgency
+        lead: An object or dict with .type (or ['product_category']), .price, .location, .urgency_score, .final_score
+        buyer: An object or dict with .interest_type, .budget_min, .budget_max, .location, .urgency
     """
     score = 0.0 
 
@@ -26,30 +33,67 @@ def buyer_match_score(vehicle, buyer):
             return obj.get(actual_key, default)
         return default
 
-    v_type = get_val(vehicle, 'type')
-    b_type = get_val(buyer, 'vehicle_type')
+    v_type = get_val(lead, 'type')
+    b_type = get_val(buyer, 'interest_type') or get_val(buyer, 'vehicle_type') # Support legacy field
     if b_type and v_type and b_type.lower() in v_type.lower(): 
-        score += 0.25 
+        score += 0.40 
 
-    v_price = get_val(vehicle, 'price')
+    v_price = get_val(lead, 'price')
     b_min = get_val(buyer, 'budget_min')
     b_max = get_val(buyer, 'budget_max')
     if b_min and b_max and v_price: 
         if b_min <= v_price <= b_max: 
-            score += 0.30 
+            score += 0.40 
 
-    v_loc = get_val(vehicle, 'location')
+    v_loc = get_val(lead, 'location')
     b_loc = get_val(buyer, 'location')
     if b_loc and v_loc and b_loc.lower() == v_loc.lower(): 
-        score += 0.15 
-
-    b_urgency = get_val(buyer, 'urgency', 0)
-    v_urgency = get_val(vehicle, 'urgency_score', 0)
-    if b_urgency > 0.7 and v_urgency > 0.7: 
         score += 0.20 
 
-    v_final = get_val(vehicle, 'final_score', 0)
-    if v_final > 0.75: 
-        score += 0.10 
-
     return round(min(score, 1.0), 2)
+
+class MarketBrain:
+    """
+    Core Intelligence: Seller -> Buyer Matching Loop.
+    Matches incoming seller leads with active buyer intents.
+    """
+    def __init__(self, db: Session):
+        self.db = db
+
+    def find_matches_for_lead(self, lead: models.Lead):
+        """Find all active buyers who might be interested in this new lead."""
+        active_intents = self.db.query(models.BuyerIntent).filter(
+            models.BuyerIntent.is_active == 1
+        ).all()
+        
+        matches = []
+        for intent in active_intents:
+            score = buyer_match_score(lead, intent)
+            if score >= 0.6: # Threshold for a 'good' match
+                matches.append({
+                    "intent": intent,
+                    "score": score
+                })
+        
+        # Sort by best match
+        matches.sort(key=lambda x: x["score"], reverse=True)
+        return matches
+
+    def process_new_lead(self, lead: models.Lead):
+        """
+        Matching Loop:
+        1. Find matching buyers
+        2. Log the match
+        3. (Optional) Trigger notifications
+        """
+        matches = self.find_matches_for_lead(lead)
+        if matches:
+            logger.info(f"MATCH FOUND: Lead {lead.id} ({lead.product_category}) matched with {len(matches)} buyers.")
+            for m in matches:
+                intent = m["intent"]
+                score = m["score"]
+                # In a real scenario, we might create a 'Match' record in the DB
+                # or send a push notification/whatsapp to the user associated with the intent.
+                logger.info(f"  - Match with Intent {intent.id} (User: {intent.user_id}) - Score: {score}")
+        
+        return matches

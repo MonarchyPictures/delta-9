@@ -1,9 +1,13 @@
 import getApiUrl, { getApiKey } from '../config';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, MapPin, Filter, Database, Clock, Zap, MessageSquare } from 'lucide-react';
+import { Search, MapPin, Filter, Database, Clock, Zap, MessageSquare, List, Table, Download } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import LeadCard from '../components/LeadCard';
+import LeadTable from '../components/LeadTable';
+import { EmptyState } from '../components/UXStates';
 
 const Leads = () => {
+  const locationState = useLocation();
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -15,8 +19,87 @@ const Leads = () => {
   const [hasWhatsapp, setHasWhatsapp] = useState(false); // Default to FALSE to show more signals
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [error, setError] = useState(null);
+  const [viewMode, setViewMode] = useState('list'); // 'list' or 'table'
+  const [selected, setSelected] = useState([]);
+
+  const downloadSelectedLeads = () => {
+    const selectedData = leads.filter(l => selected.includes(l.lead_id || l.id));
+    
+    const content = selectedData.map(l => `
+Source: ${l.source_name || l.source_url || "N/A"}
+Product: ${l.product || "N/A"}
+Location: ${l.location_raw || l.property_city || "N/A"}
+Text: ${l.intent || l.intent_query || "N/A"}
+Phone: ${l.phone || "N/A"}
+Intent Score: ${l.buyer_match_score || l.intent_score || 0}
+WhatsApp: ${l.whatsapp_url || l.whatsapp_link || "N/A"}
+---
+    `).join("\n");
+
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `delta9-leads-${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportLeadsFromBackend = async () => {
+    try {
+      const apiUrl = getApiUrl();
+      const apiKey = getApiKey();
+      
+      const res = await fetch(`${apiUrl}/leads/export`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': apiKey
+        },
+        body: JSON.stringify({ ids: selected })
+      });
+
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const contentDisposition = res.headers.get('Content-Disposition');
+        let filename = `delta9-export-${new Date().toISOString().split('T')[0]}.txt`;
+        if (contentDisposition && contentDisposition.includes('filename=')) {
+          filename = contentDisposition.split('filename=')[1].replace(/"/g, '');
+        }
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Export failed');
+      }
+    } catch (err) {
+      console.error("Backend export failed:", err);
+      alert(`Export failed: ${err.message}`);
+    }
+  };
   
   const abortControllerRef = useRef(null);
+
+  // Sync with URL query params
+  useEffect(() => {
+    const params = new URLSearchParams(locationState.search);
+    const q = params.get('q');
+    const tr = params.get('time_range');
+    const hi = params.get('high_intent');
+    const wa = params.get('has_whatsapp');
+    const loc = params.get('location');
+
+    if (q) setQuery(q);
+    if (tr) setTimeRange(tr);
+    if (hi === 'true') setHighIntent(true);
+    if (wa === 'true') setHasWhatsapp(true);
+    if (loc) setLocation(loc);
+  }, [locationState.search]);
 
   // Debounce query
   useEffect(() => {
@@ -30,12 +113,17 @@ const Leads = () => {
     // If a request is already in progress:
     if (abortControllerRef.current) {
       if (isPolling) {
-        // If it's a polling request, skip to avoid overlapping/noise
-        return;
+        // If it's a polling request and a foreground request is active, skip
+        // but ONLY if the foreground request is relatively fresh (less than 30s)
+        if (abortControllerRef.current.startTime && (Date.now() - abortControllerRef.current.startTime < 30000)) {
+          return;
+        }
       } else {
         // If it's a foreground request (user search/filter), abort the previous one
         // because we need the new results immediately.
-        abortControllerRef.current.abort();
+        const oldController = abortControllerRef.current;
+        abortControllerRef.current = null; // Clear it before aborting to avoid race conditions
+        oldController.abort();
       }
     }
 
@@ -43,6 +131,7 @@ const Leads = () => {
     setError(null);
     
     const controller = new AbortController();
+    controller.startTime = Date.now();
     abortControllerRef.current = controller;
     
     const timeoutId = setTimeout(() => {
@@ -85,9 +174,13 @@ const Leads = () => {
              setTimeRange('24h');
              return; // The useEffect dependency will trigger a new fetch
           }
-          setLeads(data.leads);
+          
+          // RANKING ALREADY HANDLED BY BACKEND: High-value leads float automatically
+          const sortedLeads = (data.leads || []).sort((a, b) => (b.buyer_match_score || 0) - (a.buyer_match_score || 0));
+          setLeads(sortedLeads);
         } else {
-          setLeads(Array.isArray(data) ? data : []);
+          const rawLeads = (Array.isArray(data) ? data : []).sort((a, b) => (b.buyer_match_score || 0) - (a.buyer_match_score || 0));
+          setLeads(rawLeads);
         }
         setLastUpdated(new Date());
       } else {
@@ -122,10 +215,33 @@ const Leads = () => {
         }
       });
       if (res.ok) {
-        setLeads(prev => prev.map(l => l.lead_id === leadId ? { ...l, status: newStatus } : l));
+        setLeads(prev => prev.map(l => (l.lead_id === leadId || l.id === leadId) ? { ...l, status: newStatus } : l));
       }
     } catch (err) {
       console.error("Status update failed:", err);
+    }
+  };
+
+  const handleTap = async (leadId) => {
+    try {
+      const apiUrl = getApiUrl();
+      const apiKey = getApiKey();
+      const res = await fetch(`${apiUrl}/leads/${leadId}/tap`, {
+        method: 'POST',
+        headers: {
+          'X-API-Key': apiKey
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLeads(prev => prev.map(l => 
+          (l.lead_id === leadId || l.id === leadId) 
+            ? { ...l, status: data.lead_status, tap_count: data.tap_count } 
+            : l
+        ));
+      }
+    } catch (err) {
+      console.error("Tap tracking failed:", err);
     }
   };
 
@@ -148,6 +264,46 @@ const Leads = () => {
               </div>
             </div>
             
+            <div className="flex items-center gap-2">
+              <div className="flex bg-white/5 border border-white/10 p-1 rounded-xl">
+                <button 
+                  onClick={() => setViewMode('list')}
+                  className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white'}`}
+                  title="List View"
+                >
+                  <List size={16} />
+                </button>
+                <button 
+                  onClick={() => setViewMode('table')}
+                  className={`p-2 rounded-lg transition-all ${viewMode === 'table' ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white'}`}
+                  title="Table View"
+                >
+                  <Table size={16} />
+                </button>
+              </div>
+
+              {selected.length > 0 && (
+                <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-4">
+                  <button 
+                    onClick={downloadSelectedLeads}
+                    className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                    title="Fast Frontend Download"
+                  >
+                    <Download size={14} />
+                    Fast ({selected.length})
+                  </button>
+                  <button 
+                    onClick={exportLeadsFromBackend}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                    title="Full Backend Export"
+                  >
+                    <Database size={14} />
+                    Export
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div className="relative group w-full md:w-96">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/20 group-focus-within:text-blue-500 transition-colors" />
               <input 
@@ -208,7 +364,7 @@ const Leads = () => {
 
             <button 
               onClick={() => setHighIntent(!highIntent)}
-              className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border transition-all text-xs font-black uppercase tracking-widest ${
+              className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border transition-all text-xs font-black uppercase tracking-widest cursor-pointer ${
                 highIntent 
                   ? 'bg-red-600 border-red-600 text-white shadow-lg shadow-red-600/20' 
                   : 'bg-white/5 border-white/10 text-white/20 hover:bg-white/10'
@@ -220,7 +376,7 @@ const Leads = () => {
 
             <button 
               onClick={() => setHasWhatsapp(!hasWhatsapp)}
-              className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border transition-all text-xs font-black uppercase tracking-widest ${
+              className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border transition-all text-xs font-black uppercase tracking-widest cursor-pointer ${
                 hasWhatsapp 
                   ? 'bg-green-600 border-green-600 text-white shadow-lg shadow-green-600/20' 
                   : 'bg-white/5 border-white/10 text-white/20 hover:bg-white/10'
@@ -257,44 +413,69 @@ const Leads = () => {
             <div className="text-white/40 font-bold uppercase tracking-widest text-sm animate-pulse">Syncing with Kenya Market Nodes...</div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <>
             {leads.length > 0 ? (
-              leads.map((lead) => (
-                <LeadCard key={lead.lead_id} lead={lead} onStatusChange={handleStatusChange} />
-              ))
+              viewMode === 'list' ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {leads.map((lead, index) => (
+                    <LeadCard 
+                      key={lead.lead_id || lead.id || `lead-${index}`} 
+                      lead={lead} 
+                      onStatusChange={handleStatusChange} 
+                      onTap={handleTap} 
+                    />
+                  ))}
+                </div>
+              ) : (
+                <LeadTable 
+                  leads={leads} 
+                  selected={selected} 
+                  setSelected={setSelected} 
+                  onStatusChange={handleStatusChange}
+                  onTap={handleTap}
+                />
+              )
             ) : (
-              <div className="col-span-full flex flex-col items-center justify-center py-20 bg-white/5 border border-white/10 rounded-3xl space-y-6 text-center">
+              <div className="flex flex-col items-center justify-center py-20 bg-white/5 border border-white/10 rounded-3xl space-y-6 text-center">
                 <div className="p-6 bg-white/5 rounded-full">
                   <Database className="w-12 h-12 text-white/20" />
                 </div>
-                <div className="space-y-2">
-              <h3 className="text-xl font-black text-white uppercase tracking-tighter italic">
-                No buyer intent detected in the last {timeRange === '24h' ? '24' : (timeRange === '72h' ? '72' : (timeRange === '1h' ? '1' : '2'))} hours
-              </h3>
-              <p className="text-white/40 text-sm max-w-md mx-auto">The engine has strictly filtered out all suppliers, agents, and stale signals. Only real-time demand is allowed.</p>
-            </div>
-            <div className="flex flex-col items-center gap-4">
-              <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">System Suggestion</span>
-              {(!timeRange || timeRange === '2h' || timeRange === '' || timeRange === '1h') ? (
-                <button 
-                  onClick={() => setTimeRange('24h')}
-                  className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/20 active:scale-95"
-                >
-                  Widen Time Window (24h)
-                </button>
-              ) : (
-                <button 
-                  onClick={() => setTimeRange('72h')}
-                  className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/20 active:scale-95"
-                >
-                  Widen Time Window (72h)
-                </button>
-              )}
-              <p className="text-[10px] text-white/20 uppercase tracking-widest">DO NOT BROADEN INTENT RULES</p>
-            </div>
+                <div className="space-y-2 px-6">
+                  <h3 className="text-xl font-black text-white uppercase tracking-tighter italic">
+                    {hasWhatsapp && leads.length === 0 
+                      ? "No WhatsApp taps yet — signals still warming up"
+                      : `No buyer intent detected in the last ${timeRange === '24h' ? '24' : (timeRange === '72h' ? '72' : (timeRange === '1h' ? '1' : '2'))} hours`
+                    }
+                  </h3>
+                  <p className="text-white/40 text-sm max-w-md mx-auto">
+                    {hasWhatsapp && leads.length === 0
+                      ? "The system is currently aggregating live WhatsApp engagement signals from verified buyers. Check back in a few minutes."
+                      : "The engine has strictly filtered out all suppliers, agents, and stale signals. Only real-time demand is allowed."
+                    }
+                  </p>
+                </div>
+                <div className="flex flex-col items-center gap-4">
+                  <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">System Suggestion</span>
+                  {(!timeRange || timeRange === '2h' || timeRange === '' || timeRange === '1h') ? (
+                    <button 
+                      onClick={() => setTimeRange('24h')}
+                      className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/20 active:scale-95 cursor-pointer"
+                    >
+                      Widen Time Window (24h)
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => setTimeRange('72h')}
+                      className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/20 active:scale-95 cursor-pointer"
+                    >
+                      Widen Time Window (72h)
+                    </button>
+                  )}
+                  <p className="text-[10px] text-white/20 uppercase tracking-widest">DO NOT BROADEN INTENT RULES</p>
+                </div>
               </div>
             )}
-          </div>
+          </>
         )}
       </div>
     </div>

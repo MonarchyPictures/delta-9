@@ -16,17 +16,17 @@ export const LeadSkeleton = () => (
   </div>
 );
 
-export const EmptyState = () => (
+export const EmptyState = ({ message, title }) => (
   <div className="flex flex-col items-center justify-center py-24 px-6 text-center bg-gray-50/50 border border-dashed border-gray-200 rounded-3xl">
     <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-8 border border-gray-200 relative">
       <Radar size={40} className="text-gray-400 animate-pulse" />
       <div className="absolute inset-0 bg-blue-500/5 rounded-full animate-ping duration-[3000ms]" />
     </div>
-    <h3 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight uppercase italic">Searching for Signals</h3>
+    <h3 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight uppercase italic">{title || "Searching for Signals"}</h3>
     <p className="text-gray-500 max-w-xs text-sm font-medium leading-relaxed mb-8">
-      Delta9 is scanning the network. No active buying intent detected within your current parameters yet.
+      {message || "Delta9 is scanning the network. No active buying intent detected within your current parameters yet."}
     </p>
-    <button className="flex items-center gap-2 text-blue-600 font-bold text-[10px] uppercase tracking-widest group">
+    <button className="flex items-center gap-2 text-blue-600 font-bold text-[10px] uppercase tracking-widest group cursor-pointer">
       Broaden Search Parameters
       <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform" />
     </button>

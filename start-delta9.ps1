@@ -4,7 +4,7 @@
 
 # 1️⃣ Set environment variables
 $env:PIPELINE_MODE = "bootstrap"
-$env:CONFIDENCE_THRESHOLD = "0.3"       # allows low-confidence leads
+$env:PIPELINE_CATEGORY = "vehicles"
 $env:VITE_API_URL = "http://localhost:8000"
 $env:VITE_API_KEY = "d9_prod_secret_key_2024"
 
