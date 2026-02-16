@@ -18,25 +18,19 @@ def seed_agents():
             "name": "Furniture Hunter",
             "query": "looking for furniture",
             "location": "Kenya",
-            "is_active": 1,
-            "enable_alerts": 1,
-            "last_run": None
+            "active": 1
         },
         {
             "name": "Electronics Radar",
             "query": "buying used iphone",
             "location": "Kenya",
-            "is_active": 1,
-            "enable_alerts": 1,
-            "last_run": None
+            "active": 1
         },
         {
             "name": "Vehicle Scout",
             "query": "want to buy car",
             "location": "Kenya",
-            "is_active": 1,
-            "enable_alerts": 1,
-            "last_run": None
+            "active": 1
         }
     ]
     

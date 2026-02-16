@@ -1,9 +1,12 @@
 import logging
 import uuid
-import random
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
+import asyncio
+from app.db.database import SessionLocal
+from app.scrapers import run_scrapers
+from app.ingestion import ingest_leads
 
 from ..db import models
 from ..utils.playwright_helpers import get_page_content
@@ -12,6 +15,27 @@ from ..intelligence.verification import verify_leads as cross_source_verify
 from ..config import PIPELINE_MODE, PROD_STRICT, PIPELINE_CATEGORY
 
 logger = logging.getLogger(__name__)
+
+async def run_pipeline_for_query(query: str, location: str = "Kenya") -> List[models.Lead]:
+    """
+    Orchestrates the search pipeline:
+    1. Executes search (async).
+    2. Processes raw results into Lead objects.
+    3. Returns list of new leads.
+    """
+    try:
+        # 1️⃣ Run scrapers
+        raw_results = await run_scrapers(query, location)
+
+        # 2️⃣ Ingest & deduplicate (sync blocking call moved to thread)
+        verified_leads = await asyncio.to_thread(ingest_leads, raw_results)
+
+        # 3️⃣ Return for DB saving
+        return verified_leads
+        
+    except Exception as e:
+        logger.error(f"Pipeline execution failed for query '{query}': {e}")
+        return []
 
 class LeadPipeline:
     def __init__(self, db: Session):
@@ -45,7 +69,7 @@ class LeadPipeline:
         Process a single standardized raw lead from a "dumb" scraper.
         The Engine ("smart") decides if this is a buyer and extracts details.
         """
-        text = raw_data.get('text', '')
+        text = raw_data.get('text') or raw_data.get('snippet', '')
         url = raw_data.get('url', '')
         
         if not text or not url:
@@ -53,7 +77,8 @@ class LeadPipeline:
 
         # 1. Intent Validation (Smart Engine Decision)
         if not self.scorer.validate_lead(text):
-            logger.debug(f"Lead rejected by engine validation: {url}")
+            score = self.scorer.calculate_intent_score(text)
+            logger.warning(f"Lead rejected by engine validation: {url} | Score: {score} | Text: {text[:50]}...")
             return None
 
         # 2. Scoring & Readiness (Smart Engine Logic)
@@ -71,6 +96,7 @@ class LeadPipeline:
         # Check if exists
         existing = self.db.query(models.Lead).filter(models.Lead.source_url == url).first()
         if existing:
+            logger.warning(f"Lead rejected - already exists in DB: {url}")
             return None
 
         # Determine product category dynamically from raw_data or query
@@ -84,7 +110,7 @@ class LeadPipeline:
             quantity_requirement="1",
             intent_score=intent_score,
             location_raw=raw_data.get('location', 'Global'),
-            radius_km=random.randint(1, 50),
+            radius_km=0.0,
             source_platform=raw_data.get('source', 'Web'),
             request_timestamp=datetime.now(timezone.utc),
             whatsapp_link=self._generate_whatsapp_link(phone, product_category),

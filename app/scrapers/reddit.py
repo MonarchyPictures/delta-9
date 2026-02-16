@@ -20,8 +20,11 @@ class RedditScraper(BaseScraper):
             loc_name = "Global"
 
         url = f"https://www.reddit.com/search/?q={query}{location_suffix}&t=day" 
-        # html = self.get_page_content(url, wait_selector='shreddit-post') 
-        html = None # Placeholder
+        try:
+            html = self.get_page_content(url, wait_selector='shreddit-post') 
+        except Exception as e:
+            logger.error(f"REDDIT: Failed to fetch page: {e}")
+            html = None
         
         if not html:
             return []

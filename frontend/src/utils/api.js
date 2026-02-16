@@ -1,5 +1,5 @@
 // Config via Vite env vars
-export const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8001";
+export const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 export const API_KEY = import.meta.env.VITE_API_KEY || "d9_prod_secret_key_2024";
 export const GOOGLE_CSE_ID = "f32db13486dc14c26";
 
@@ -68,7 +68,7 @@ export const fetchLeadsMeta = async (limit = 10) => {
 
 export const fetchNotifications = async () => {
   try {
-    const response = await fetchWithRetry(`${API_URL}/notifications`, {
+    const response = await fetchWithRetry(`${API_URL}/notifications/`, {
       method: "GET",
       headers,
     });
@@ -76,6 +76,20 @@ export const fetchNotifications = async () => {
   } catch (error) {
     console.error("Error fetching notifications:", error);
     return [];
+  }
+};
+
+export const fetchNotificationCount = async (unreadOnly = false) => {
+  try {
+    const response = await fetchWithRetry(`${API_URL}/notifications/count?unread_only=${unreadOnly}`, {
+      method: "GET",
+      headers,
+    });
+    const data = await response.json();
+    return data.count || 0;
+  } catch (error) {
+    console.error("Error fetching notification count:", error);
+    return 0;
   }
 };
 
@@ -165,6 +179,32 @@ export const deleteAgent = async (id) => {
   } catch (error) {
     console.error("Error deleting agent:", error);
     return { status: "error" };
+  }
+};
+
+export const stopAgent = async (id) => {
+  try {
+    const response = await fetchWithRetry(`${API_URL}/agents/${id}/stop`, {
+      method: "POST",
+      headers,
+    });
+    return await response.json();
+  } catch (error) {
+    console.error("Error stopping agent:", error);
+    return { status: "error" };
+  }
+};
+
+export const fetchAgentLeads = async (id) => {
+  try {
+    const response = await fetchWithRetry(`${API_URL}/agents/${id}/leads`, {
+      method: "GET",
+      headers,
+    });
+    return await response.json();
+  } catch (error) {
+    console.error("Error fetching agent leads:", error);
+    return [];
   }
 };
 

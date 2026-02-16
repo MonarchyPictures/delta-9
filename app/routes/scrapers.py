@@ -20,24 +20,31 @@ def list_scrapers():
         failures = metrics.get("failures", 0)
         
         # Calculate dynamic success rate
-        success_rate = (runs - failures) / runs if runs > 0 else 0
+        success_rate_val = (runs - failures) / runs if runs > 0 else 0
+        success_rate_str = f"{int(success_rate_val * 100)}%"
         
-        results.append({
-            "name": name,
-            "priority_score": round(metrics.get("priority_score", 0.0), 4),
-            "avg_confidence": round(metrics.get("avg_confidence", 0.0), 4),
-            "avg_latency": round(metrics.get("avg_latency", 0.0), 2),
-            "success_rate": round(success_rate, 4),
-            "auto_disabled": metrics.get("auto_disabled", False),
-            "config": {
-                "enabled": meta.get("enabled"),
-                "core": meta.get("core"),
-                "mode": meta.get("mode")
+        data = {
+            "enabled": meta.get("enabled"),
+            "core": meta.get("core"),
+            "mode": meta.get("mode"),
+            "cost": meta.get("cost"),
+            "noise": meta.get("noise"),
+            "categories": meta.get("categories"),
+            "metrics": {
+                "leads_found": metrics.get("leads", 0),
+                "success_rate": success_rate_str,
+                "avg_speed": f"{metrics.get('avg_latency', 0.0):.2f}s",
+                "priority_score": round(metrics.get("priority_score", 0.0), 4),
+                "avg_confidence": round(metrics.get("avg_confidence", 0.0), 4),
+                "auto_disabled": metrics.get("auto_disabled", False)
             }
-        })
+        }
+        results.append((name, data))
     
     # Sort by priority score for live ranking visibility
-    return sorted(results, key=lambda x: x["priority_score"], reverse=True)
+    results.sort(key=lambda x: x[1]["metrics"]["priority_score"], reverse=True)
+    
+    return dict(results)
 
 @router.get("/scrapers/status")
 def get_scraper_status(request: Request, role: str = Depends(require_admin)):

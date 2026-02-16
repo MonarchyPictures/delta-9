@@ -1,9 +1,11 @@
-from sqlalchemy import Column, String, Float, DateTime, JSON, ForeignKey, Enum, Integer
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, String, Float, DateTime, JSON, ForeignKey, Enum, Integer, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import enum
-
-Base = declarative_base()
+import uuid
+import hashlib
+from app.db.base_class import Base
 
 class ContactStatus(enum.Enum):
     NOT_CONTACTED = "not_contacted"
@@ -21,38 +23,41 @@ class CRMStatus(enum.Enum):
 
 class Lead(Base):
     __tablename__ = "leads"
-    __table_args__ = {'extend_existing': True}
-
+    
     # Lead Identification & Metadata
     id = Column(String, primary_key=True, index=True) # Maps to lead_id
-    buyer_name = Column(String)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True, index=True)
+    query = Column(String, nullable=True)
+    location = Column(String, nullable=True)
+    buyer_name = Column(String, index=True)
     contact_phone = Column(String, index=True) # Maps to phone
+    contact_email = Column(String, index=True) # NEW: Email support
     product_category = Column(String, index=True) # Maps to product
     quantity_requirement = Column(String) # Maps to quantity
-    intent_score = Column(Float) # Maps to intent_strength
+    intent_score = Column(Float, index=True) # Maps to intent_strength
     location_raw = Column(String) # Maps to location
     radius_km = Column(Float, default=0.0) # Maps to distance_km
     source_platform = Column(String, index=True) # Maps to source
-    request_timestamp = Column(DateTime) # Maps to timestamp
+    request_timestamp = Column(DateTime, index=True) # Maps to timestamp
     
     # NEW: WhatsApp Integration
     whatsapp_link = Column(String)
     contact_method = Column(String) # NEW: Explicit contact method from scraper
     
     # NEW: Status & Proof of Life (PROD STRICT)
-    status = Column(Enum(CRMStatus), default=CRMStatus.NEW)
+    status = Column(Enum(CRMStatus), default=CRMStatus.NEW, index=True)
     source_url = Column(String)
     http_status = Column(Integer)
     latency_ms = Column(Integer)
     
     # Standardized Buyer Fields
-    is_hot_lead = Column(Integer, default=0)
+    is_hot_lead = Column(Integer, default=0, index=True)
     buyer_request_snippet = Column(String)
-    urgency_level = Column(String, default="low") # NEW: High/Medium/Low
-    confidence_score = Column(Float, default=0.0)
+    urgency_level = Column(String, default="low", index=True) # NEW: High/Medium/Low
+    confidence_score = Column(Float, default=0.0, index=True)
     price = Column(Float, nullable=True) # Extracted price if available
     is_saved = Column(Integer, default=0)
-    is_verified_signal = Column(Integer, default=1) # PROD_STRICT: Signal verification flag
+    is_verified_signal = Column(Integer, default=1, index=True) # PROD_STRICT: Signal verification flag
     notes = Column(String)
     contact_source = Column(String) # public | inferred | unavailable
     budget = Column(String) # e.g. "1.1M" or "800k"
@@ -62,11 +67,131 @@ class Lead(Base):
     geo_score = Column(Float, default=0.0) # NEW: 0.0 -> 1.0 geographic relevance
     geo_strength = Column(String, default="low") # NEW: high | medium | low
     geo_region = Column(String, default="Global") # NEW: Nairobi | Mombasa | etc
+    
+    # 🎯 RANKING ENGINE (Runs After Save)
+    ranked_score = Column(Float, default=0.0, index=True) # Unified priority score
+    rank_score = Column(Float, default=0.0, index=True) # Intelligent Ranking Engine Score
+    
+    # Response Tracking
+    response_count = Column(Integer, default=0)
+    non_response_flag = Column(Integer, default=0)
+    
+    # Hyper-Specific Intent Intelligence
+    readiness_level = Column(String)
+    urgency_score = Column(Float)
+    budget_info = Column(String)
+    product_specs = Column(JSON)
+    deal_probability = Column(Float)
+    intent_type = Column(String)
+    
+    # Smart Matching
+    match_score = Column(Float, default=0.0)
+    compatibility_status = Column(String)
+    match_details = Column(JSON)
+    
+    # Intent Analysis Extensions
+    payment_method_preference = Column(String)
+    
+    # Local Advantage
+    delivery_range_score = Column(Float, default=0.0)
+    neighborhood = Column(String)
+    local_pickup_preference = Column(Integer, default=0)
+    delivery_constraints = Column(String)
+    
+    # Deal Readiness
+    decision_authority = Column(Integer, default=0)
+    prior_research_indicator = Column(Integer, default=0)
+    comparison_indicator = Column(Integer, default=0)
+    upcoming_deadline = Column(DateTime)
+    
+    # Real-Time & Competitive Intelligence
+    availability_status = Column(String)
+    competition_count = Column(Integer)
+    is_unique_request = Column(Integer)
+    optimal_response_window = Column(String)
+    peak_response_time = Column(String)
+    
+    # Contact Verification & Reliability
+    is_contact_verified = Column(Integer, default=0)
+    contact_reliability_score = Column(Float, default=0.0)
+    preferred_contact_method = Column(String)
+    disposable_email_flag = Column(Integer, default=0)
+    contact_metadata = Column(JSON)
+    
+    # Response Tracking System (Extended)
+    average_response_time_mins = Column(Float)
+    conversion_rate = Column(Float, default=0.0)
+    
+    # Comprehensive Lead Intelligence
+    buyer_history = Column(JSON)
+    platform_activity_level = Column(String)
+    past_response_rate = Column(Float, default=0.0)
+    market_price_range = Column(String)
+    seasonal_demand = Column(String)
+    supply_status = Column(String)
+    conversion_signals = Column(JSON)
+    talking_points = Column(JSON)
+    competitive_advantages = Column(JSON)
+    pricing_strategy = Column(String)
+    
+    verification_badges = Column(JSON)
+    is_genuine_buyer = Column(Integer, default=1)
+    last_activity = Column(DateTime)
+
     tap_count = Column(Integer, default=0) # Track clicks for schema compliance
     
+    # Deduplication
+    content_hash = Column(String, index=True) # Hash of core content
+
+    __table_args__ = (
+        UniqueConstraint("agent_id", "source_url", name="uix_agent_url"),
+        {'extend_existing': True}
+    )
+
     # Timestamps
     created_at = Column(DateTime, server_default=func.now(), index=True)
     updated_at = Column(DateTime, onupdate=func.now())
+
+    @property
+    def title(self):
+        return self.buyer_name
+
+    @property
+    def content(self):
+        return self.buyer_request_snippet
+
+    @property
+    def source(self):
+        return self.source_platform
+
+    @property
+    def url(self):
+        return self.source_url
+
+    @property
+    def confidence(self):
+        return self.confidence_score
+
+    def __init__(self, **kwargs):
+        # Map user-friendly aliases to DB columns
+        if 'title' in kwargs:
+            self.buyer_name = kwargs.pop('title')
+        if 'content' in kwargs:
+            self.buyer_request_snippet = kwargs.pop('content')
+        if 'source' in kwargs:
+            self.source_platform = kwargs.pop('source')
+        if 'url' in kwargs:
+            self.source_url = kwargs.pop('url')
+        if 'confidence' in kwargs:
+            self.confidence_score = kwargs.pop('confidence')
+            
+        # Set remaining kwargs as attributes
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+            
+        # Ensure ID is generated if not provided
+        if not getattr(self, 'id', None):
+             self.id = str(uuid.uuid4())
 
     def to_dict(self):
         from ..intelligence.outreach import OutreachEngine
@@ -103,7 +228,8 @@ class Lead(Base):
             "buyer_match_score": self.buyer_match_score or 0.0,
             "geo_score": self.geo_score or 0.0,
             "geo_strength": self.geo_strength or "low",
-            "geo_region": self.geo_region or "Global"
+            "geo_region": self.geo_region or "Global",
+            "ranked_score": self.ranked_score or 0.0
         }
 
 class BuyerLead(Base):
@@ -122,6 +248,18 @@ class BuyerLead(Base):
     confidence = Column(Float) # SQL REAL maps to Float in SQLAlchemy
     posted_at = Column(DateTime)
     created_at = Column(DateTime, server_default=func.now())
+
+class AgentRunLog(Base):
+    __tablename__ = "agent_run_logs"
+
+    id = Column(Integer, primary_key=True)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), index=True, nullable=False)
+    run_time = Column(DateTime, default=func.now())
+    leads_found = Column(Integer, default=0)
+    errors = Column(Text, nullable=True)
+    duration_ms = Column(Integer, default=0)
+
+    agent = relationship("Agent", backref="run_logs")
 
     def to_dict(self):
         return {
@@ -188,59 +326,18 @@ class ActivityLog(Base):
     timestamp = Column(DateTime, server_default=func.now(), index=True)
     extra_metadata = Column(JSON, nullable=True) # For additional info like product name, etc.
 
-class Agent(Base):
-    __tablename__ = "agents"
-    
-    id = Column(Integer, primary_key=True)
-    name = Column(String)
-    email = Column(String, index=True, nullable=True) # RECIPIENT EMAIL
-    query = Column(String)
-    location = Column(String, default="Kenya")
-    radius = Column(Integer, default=50) # Discovery radius in km
-    min_intent_score = Column(Float, default=0.7) # Minimum intent score to accept
-    
-    # Scheduling fields
-    interval_hours = Column(Integer, default=2) # e.g. every 2 hours
-    duration_days = Column(Integer, default=7) # e.g. for 7 days
-    next_run_at = Column(DateTime)
-    
-    is_active = Column(Integer, default=1)
-    enable_alerts = Column(Integer, default=1) # New: enable real-time alerts
-    last_run = Column(DateTime)
-    created_at = Column(DateTime, server_default=func.now())
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "name": self.name,
-            "query": self.query,
-            "location": self.location,
-            "interval_hours": self.interval_hours,
-            "duration_days": self.duration_days,
-            "next_run_at": self.next_run_at.isoformat() if self.next_run_at else None,
-            "is_active": bool(self.is_active),
-            "enable_alerts": bool(self.enable_alerts),
-            "last_run": self.last_run.isoformat() if self.last_run else None,
-            "created_at": self.created_at.isoformat() if self.created_at else None
-        }
+# Import Agent from new location but allow it to be accessed via models.Agent
+from app.models.agent import Agent
+from app.models.agent_raw_lead import AgentRawLead
+from app.models.notification import Notification
 
 class AgentLead(Base):
     __tablename__ = "agent_leads"
     
     id = Column(Integer, primary_key=True)
-    agent_id = Column(Integer, ForeignKey("agents.id"))
+    agent_id = Column(String, ForeignKey("agents.id"))
     lead_id = Column(String, ForeignKey("leads.id"))
     discovered_at = Column(DateTime, server_default=func.now())
-
-class Notification(Base):
-    __tablename__ = "notifications"
-    
-    id = Column(Integer, primary_key=True)
-    lead_id = Column(String, ForeignKey("leads.id"))
-    agent_id = Column(Integer, ForeignKey("agents.id"))
-    message = Column(String)
-    is_read = Column(Integer, default=0)
-    created_at = Column(DateTime, server_default=func.now())
 
 class SystemSetting(Base):
     __tablename__ = "system_settings"
@@ -280,3 +377,14 @@ class CategoryMetric(Base):
     verified_leads = Column(Integer, default=0)
     verified_rate = Column(Float, default=0.0)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+class ErrorLog(Base):
+    __tablename__ = "error_logs"
+
+    id = Column(Integer, primary_key=True)
+    agent_id = Column(String, index=True, nullable=True)
+    scraper_name = Column(String, index=True, nullable=True)
+    error_type = Column(String, index=True) # TIMEOUT, CRASH, NETWORK
+    error_message = Column(Text)
+    stack_trace = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())

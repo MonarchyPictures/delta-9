@@ -49,6 +49,6 @@ class KeywordExpander:
 
     def identify_emerging_terms(self, post_texts):
         """Analyze a batch of posts to find frequent new terms (ML-based)."""
-        # In a real implementation, this would use TF-IDF or NER 
-        # to find frequently mentioned entities that aren't in our current dict.
-        return ["example_new_term"]
+        # Placeholder for future TF-IDF/NER implementation
+        # currently returns empty list to avoid mock data pollution
+        return []

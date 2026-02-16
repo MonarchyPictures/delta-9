@@ -14,7 +14,7 @@ export const getApiUrl = () => {
         }
         // Fallback for local development only if not in PROD mode
         // Explicit backend URL
-        return "http://127.0.0.1:8001"; 
+        return "http://127.0.0.1:8000"; 
     }
     return API_URL;
 };

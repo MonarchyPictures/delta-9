@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchAgents, createAgent, deleteAgent, exportAgentLeads } from '../utils/api';
+import { fetchAgents, createAgent, deleteAgent, exportAgentLeads, stopAgent } from '../utils/api';
 
 const AgentManager = () => {
   const [agents, setAgents] = useState([]);
@@ -10,8 +10,7 @@ const AgentManager = () => {
     query: '',
     location: 'Kenya',
     interval_hours: 2,
-    duration_days: 7,
-    min_intent_score: 0.7
+    duration_days: 7
   });
 
   useEffect(() => {
@@ -37,8 +36,7 @@ const AgentManager = () => {
         query: '',
         location: 'Kenya',
         interval_hours: 2,
-        duration_days: 7,
-        min_intent_score: 0.7
+        duration_days: 7
       });
     }
     setLoading(false);
@@ -48,6 +46,14 @@ const AgentManager = () => {
     if (window.confirm('Are you sure you want to delete this agent?')) {
       await deleteAgent(id);
       setAgents(agents.filter(a => a.id !== id));
+    }
+  };
+
+  const handleStop = async (id) => {
+    if (window.confirm('Are you sure you want to stop this agent?')) {
+        await stopAgent(id);
+        // Refresh local state
+        setAgents(agents.map(a => a.id === id ? { ...a, active: false } : a));
     }
   };
 
@@ -63,6 +69,13 @@ const AgentManager = () => {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     }
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Never';
+    return new Date(dateString).toLocaleString('en-KE', { 
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+    });
   };
 
   return (
@@ -134,18 +147,6 @@ const AgentManager = () => {
                 onChange={(e) => setFormData({...formData, duration_days: parseInt(e.target.value)})}
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Min Intent Score (0.0 - 1.0)</label>
-              <input 
-                type="number" 
-                step="0.1"
-                min="0"
-                max="1"
-                className="w-full bg-gray-700 border border-gray-600 rounded p-2 focus:outline-none focus:border-blue-500"
-                value={formData.min_intent_score}
-                onChange={(e) => setFormData({...formData, min_intent_score: parseFloat(e.target.value)})}
-              />
-            </div>
           </div>
           <button 
             type="submit" 
@@ -170,43 +171,74 @@ const AgentManager = () => {
             </div>
           ) : (
             agents.map(agent => (
-              <div key={agent.id} className="bg-gray-800 p-4 rounded-lg border border-gray-700 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                  <h3 className="text-lg font-bold text-white flex items-center">
-                    {agent.name}
-                    {agent.unread_count > 0 && (
-                      <span className="ml-2 px-1.5 py-0.5 bg-blue-600 text-white text-[10px] font-black rounded-md animate-pulse">
-                        {agent.unread_count} NEW
-                      </span>
-                    )}
-                    <span className={`ml-3 px-2 py-0.5 text-xs rounded ${agent.is_active ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}`}>
-                      {agent.is_active ? 'ACTIVE' : 'EXPIRED'}
-                    </span>
-                  </h3>
-                  <p className="text-sm text-gray-400 mt-1">
-                    🔍 Query: <span className="text-blue-300">"{agent.query}"</span> | 📍 {agent.location}
-                  </p>
-                  <div className="flex gap-4 mt-2 text-xs text-gray-500">
-                    <span>⏱️ Every {agent.interval_hours}h</span>
-                    <span>⏳ For {agent.duration_days} days</span>
-                    <span>🎯 Intent ≥ {agent.min_intent_score}</span>
-                  </div>
+              <div key={agent.id} className="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-lg">
+                {/* Header */}
+                <div className="flex justify-between items-start mb-4">
+                    <div>
+                        <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                            {agent.name}
+                            <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${agent.active ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}`}>
+                                {agent.active ? 'ACTIVE' : 'STOPPED'}
+                            </span>
+                        </h3>
+                        <p className="text-sm text-gray-400 mt-1">
+                            Query: <span className="text-blue-300 font-medium">"{agent.query}"</span> • {agent.location}
+                        </p>
+                    </div>
+                </div>
+
+                {/* Metrics Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 bg-gray-900/50 p-3 rounded-md">
+                    <div className="text-center">
+                        <p className="text-xs text-gray-500 uppercase">Total Leads</p>
+                        <p className="text-2xl font-bold text-white">{agent.leads_count || 0}</p>
+                    </div>
+                    <div className="text-center">
+                        <p className="text-xs text-gray-500 uppercase">High Intent</p>
+                        <p className="text-2xl font-bold text-green-400">{agent.high_intent_count || 0}</p>
+                    </div>
+                    <div className="text-center">
+                        <p className="text-xs text-gray-500 uppercase">Next Run</p>
+                        <p className="text-sm font-medium text-blue-300 mt-1">{agent.active ? formatDate(agent.next_run_at) : '-'}</p>
+                    </div>
+                    <div className="text-center">
+                        <p className="text-xs text-gray-500 uppercase">Last Run</p>
+                        <p className="text-sm font-medium text-gray-300 mt-1">{formatDate(agent.last_run)}</p>
+                    </div>
                 </div>
                 
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => handleExport(agent.id)}
-                    className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-sm flex items-center"
-                    title="Export Leads"
-                  >
-                    📥 Export .txt
-                  </button>
-                  <button 
-                    onClick={() => handleDelete(agent.id)}
-                    className="bg-red-900/50 hover:bg-red-900 text-red-300 px-3 py-1.5 rounded text-sm"
-                  >
-                    🗑️ Delete
-                  </button>
+                {/* Actions */}
+                <div className="flex justify-between items-center border-t border-gray-700 pt-4">
+                  <div className="text-xs text-gray-500">
+                    Runs every {agent.interval_hours}h for {agent.duration_days} days
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                        onClick={() => handleExport(agent.id)}
+                        className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-sm flex items-center gap-1 transition-colors"
+                        title="Download Leads"
+                    >
+                        📥 Download
+                    </button>
+                    
+                    {agent.active && (
+                        <button 
+                            onClick={() => handleStop(agent.id)}
+                            className="bg-orange-900/50 hover:bg-orange-900 text-orange-300 px-3 py-1.5 rounded text-sm flex items-center gap-1 transition-colors"
+                            title="Stop Agent"
+                        >
+                            🛑 Stop
+                        </button>
+                    )}
+
+                    <button 
+                        onClick={() => handleDelete(agent.id)}
+                        className="bg-red-900/50 hover:bg-red-900 text-red-300 px-3 py-1.5 rounded text-sm flex items-center gap-1 transition-colors"
+                        title="Delete Agent"
+                    >
+                        🗑️ Delete
+                    </button>
+                  </div>
                 </div>
               </div>
             ))

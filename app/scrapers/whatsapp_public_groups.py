@@ -1,50 +1,56 @@
 import logging
+import urllib.parse
 from datetime import datetime, timezone
 from .base_scraper import BaseScraper, ScraperSignal
 
 logger = logging.getLogger(__name__)
-  
+
 class WhatsAppPublicGroupScraper(BaseScraper): 
     source = "whatsapp" 
- 
-    GROUPS = [ 
-        "https://chat.whatsapp.com/exampleKENYA1", 
-        "https://chat.whatsapp.com/exampleKENYA2" 
-    ] 
- 
+
     def scrape(self, query: str, time_window_hours: int): 
-        import time
-        # Simulate very fast runtime for speed boost testing
-        time.sleep(0.5) 
+        # Real implementation: Search Google for public group links
+        search_query = f"site:chat.whatsapp.com {query}"
+        encoded_query = urllib.parse.quote(search_query)
+        url = f"https://www.google.com/search?q={encoded_query}"
         
-        logger.info(f"WHATSAPP_PUBLIC: Checking groups for {query} (Window: {time_window_hours}h)")
-        results = [] 
- 
-        # Simulate finding more leads in wider windows
-        num_leads = 2 if time_window_hours <= 2 else 4
+        logger.info(f"WHATSAPP_PUBLIC: Searching Google for groups: {url}")
         
-        for i in range(num_leads): 
-            # Use a more realistic mock message that doesn't just echo the expanded query
-            mock_phone = f"071234567{i}"
-            messages = [
-                f"Anyone selling a clean {query}? My budget is around 1.5M. Contact me at {mock_phone} ASAP",
-                f"I need a {query} for a client urgently today. Nairobi area. Call {mock_phone} if you have one.",
-                f"Looking for {query}, must be in good condition. Need it now. {mock_phone}",
-                f"Who has {query} for sale? Ready to buy today. Budget 1.2M. {mock_phone}"
-            ]
-            text = messages[i % len(messages)]
-            group = self.GROUPS[i % len(self.GROUPS)]
+        html = self.get_page_content(url, wait_selector="#search")
+        if not html:
+            return []
+
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        results = []
+        # Standard Google result selectors
+        for g in soup.select('div.g'):
+            link_tag = g.select_one('a')
+            if not link_tag:
+                continue
+                
+            href = link_tag.get('href')
+            if not href or "chat.whatsapp.com" not in href:
+                continue
+                
+            title_tag = g.select_one('h3')
+            snippet_tag = g.select_one('.VwiC3b') # Common snippet class
             
-            # 🎯 DUMB SCRAPER: Standardized Signal Output
+            title = title_tag.get_text(strip=True) if title_tag else "WhatsApp Group"
+            snippet = snippet_tag.get_text(strip=True) if snippet_tag else ""
+            
+            # Create a signal
             signal = ScraperSignal(
                 source=self.source,
-                text=text,
-                author=f"WhatsApp User {i}",
-                contact=self.extract_contact_info(f"{text} {group}"),
-                location="Kenya",
-                url=f"{group}?id={i}",
+                text=f"{title} - {snippet}",
+                author="WhatsApp Group Invite",
+                contact={"whatsapp": href}, # The group link IS the contact
+                location="Global", # Hard to determine specific location from just the link
+                url=href,
                 timestamp=datetime.now(timezone.utc).isoformat()
             )
             results.append(signal.model_dump())
- 
+            
+        logger.info(f"WHATSAPP_PUBLIC: Found {len(results)} real group links")
         return results

@@ -18,12 +18,9 @@ class GoogleCSEScraper(BaseScraper):
         if env_keys:
             self.api_keys = [k.strip() for k in env_keys.split(",")]
         else:
-            self.api_keys = [
-                os.getenv("GOOGLE_CSE_API_KEY", "AIzaSyBGQ7FpAkvzWgd_v7FjLm_1fGlI8z5aZNI"),
-                # Add additional keys here for rotation
-                "AIzaSyCl-PlaceholderKey2", 
-                "AIzaSyDm-PlaceholderKey3"
-            ]
+            # Use single key if env not set, avoiding dummy placeholders
+            default_key = os.getenv("GOOGLE_CSE_API_KEY", "AIzaSyBGQ7FpAkvzWgd_v7FjLm_1fGlI8z5aZNI")
+            self.api_keys = [default_key]
         
         self.current_key_index = 0
         self.cx = cx or os.getenv("GOOGLE_CSE_ID", "b19c2ccb43df84d2e")

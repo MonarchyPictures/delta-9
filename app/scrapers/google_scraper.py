@@ -17,7 +17,8 @@ class GoogleScraper(BaseScraper):
         
         url = f"https://www.google.com/search?q={search_query}" 
         
-        html = self.get_page_content(url, wait_selector="div#search")
+        # Use a more generic selector for waiting
+        html = self.get_page_content(url, wait_selector="body")
         
         if not html:
             logger.warning("GOOGLE: No HTML content received")
@@ -32,20 +33,59 @@ class GoogleScraper(BaseScraper):
         logger.info(f"GOOGLE: Found {len(search_results)} result blocks")
         
         if len(search_results) == 0:
+            logger.info(f"GOOGLE: Found 0 result blocks. HTML snippet: {html[:500]}...")
             # Try a broader fallback selector
             search_results = soup.select('div[data-hveid]')
             logger.info(f"GOOGLE: Fallback found {len(search_results)} potential result blocks")
 
+        # Second Fallback: Just find all anchors with H3 (titles)
+        if len(search_results) == 0:
+             possible_links = soup.select('a:has(h3)')
+             logger.info(f"GOOGLE: Second fallback found {len(possible_links)} links with titles")
+             search_results = possible_links
+        
+        # Third Fallback: Basic HTML Google (links starting with /url?q=)
+        if len(search_results) == 0:
+             basic_links = soup.select('a[href^="/url?q="]')
+             logger.info(f"GOOGLE: Third fallback found {len(basic_links)} basic links")
+             search_results = basic_links
+
         for res in search_results:
-            link_tag = res.select_one('a')
-            # Multiple possible snippet selectors
-            snippet_tag = res.select_one('div.VwiC3b') or res.select_one('div.kb0u9b') or res.select_one('span.st') or res.select_one('.yD9P9') or res.select_one('.MUF3bd')
+            # If res is an anchor (from fallbacks), use it directly
+            if res.name == 'a':
+                link_tag = res
+                # Try to find snippet in parent or near elements
+                snippet_tag = None
+                # For basic HTML, snippet might be in a div or font tag nearby
+                # But keeping it simple for now
+            else:
+                link_tag = res.select_one('a')
+                # Multiple possible snippet selectors
+                snippet_tag = res.select_one('div.VwiC3b') or res.select_one('div.kb0u9b') or res.select_one('span.st') or res.select_one('.yD9P9') or res.select_one('.MUF3bd')
             
-            if not link_tag or not snippet_tag:
+            if not link_tag:
+                continue
+            
+            link = link_tag.get('href')
+            if not link:
                 continue
                 
-            link = link_tag.get('href')
-            snippet = snippet_tag.get_text()
+            # Clean up Google redirection links
+            if "/url?q=" in link:
+                try:
+                    link = link.split("/url?q=")[1].split("&")[0]
+                    import urllib.parse
+                    link = urllib.parse.unquote(link)
+                except:
+                    pass
+            
+            title_tag = link_tag.select_one('h3') or link_tag
+            title = title_tag.get_text(strip=True) if title_tag else "No Title"
+            
+            if snippet_tag:
+                snippet = snippet_tag.get_text()
+            else:
+                snippet = title
             
             if not link or not snippet or not link.startswith('http'):
                 continue

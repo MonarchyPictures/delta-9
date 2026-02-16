@@ -52,7 +52,7 @@ class OutreachEngine:
     def select_leads_for_outreach(self, db: Session, min_intent=0.7):
         """Select top-tier leads that haven't been contacted yet."""
         return db.query(models.Lead).filter(
-            models.Lead.status == models.ContactStatus.NOT_CONTACTED,
+            models.Lead.status == models.CRMStatus.NEW,
             models.Lead.intent_score >= min_intent
         ).order_by(models.Lead.intent_score.desc()).all()
 
@@ -61,7 +61,7 @@ class OutreachEngine:
         try:
             lead = db.query(models.Lead).filter(models.Lead.id == lead_id).first()
             if lead:
-                lead.status = models.ContactStatus.CONTACTED
+                lead.status = models.CRMStatus.CONTACTED
                 lead.last_contact_attempt = datetime.now()
                 db.commit()
                 return True
@@ -104,11 +104,11 @@ class OutreachEngine:
                 is_negative = any(context in text_lower for context in negative_context)
                 
                 if is_positive and not is_negative:
-                    lead.status = models.ContactStatus.CONVERTED
+                    lead.status = models.CRMStatus.CONVERTED
                     # Real-world conversion signal: positive response received
                     lead.conversion_rate = 100.0 
                 else:
-                    lead.status = models.ContactStatus.CONTACTED
+                    lead.status = models.CRMStatus.CONTACTED
                     
                 lead.notes = f"Response: {response_text}"
                 db.commit()
@@ -134,7 +134,7 @@ class OutreachEngine:
         # Look for leads that were contacted but have 0 responses
         history = query.filter(
             or_(*filters),
-            models.Lead.status == models.ContactStatus.CONTACTED,
+            models.Lead.status == models.CRMStatus.CONTACTED,
             models.Lead.response_count == 0
         ).all()
         
@@ -148,11 +148,11 @@ class OutreachEngine:
             total = db.query(models.Lead).filter(models.Lead.source_platform == platform).count()
             contacted = db.query(models.Lead).filter(
                 models.Lead.source_platform == platform,
-                models.Lead.status != models.ContactStatus.NOT_CONTACTED
+                models.Lead.status != models.CRMStatus.NEW
             ).count()
             converted = db.query(models.Lead).filter(
                 models.Lead.source_platform == platform,
-                models.Lead.status == models.ContactStatus.CONVERTED
+                models.Lead.status == models.CRMStatus.CONVERTED
             ).count()
             
             stats[platform] = {

@@ -4,9 +4,17 @@ import asyncio
 import random
 import requests
 import os
+import concurrent.futures
 from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
+
+# Tier 1 Scrapers
+from app.scrapers.google_cse import GoogleCSEScraper
+# Tier 2 Scrapers
+from app.scrapers.instagram import InstagramScraper
+from app.scrapers.google_maps import GoogleMapsScraper
+from app.scrapers.facebook_marketplace import FacebookMarketplaceScraper
 
 from duckduckgo_search import DDGS
 
@@ -34,6 +42,22 @@ class LeadScraper:
             '"{query}" "natafuta" {location}',
             '"{query}" "nahitaji" {location}'
         ]
+
+    def _run_with_timeout(self, func, args=(), kwargs=None, timeout=15):
+        """Run a function with a strict timeout using a thread pool."""
+        if kwargs is None:
+            kwargs = {}
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(func, *args, **kwargs)
+            try:
+                return future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                print(f"⚠️ Scraper timed out after {timeout}s: {func.__name__ if hasattr(func, '__name__') else str(func)}")
+                return []
+            except Exception as e:
+                print(f"⚠️ Scraper execution failed: {e}")
+                return []
 
     def duckduckgo_search(self, query, location="Kenya", source="DuckDuckGo", max_results=25):
         """Search DuckDuckGo with improved query handling, retries, and intent expansion."""
@@ -689,25 +713,123 @@ class LeadScraper:
             print(f"Google direct search error: {e}")
             return []
 
-    def scrape_platform(self, platform, query, location="Kenya", radius=50):
+    def scrape_platform(self, platform, query, location="Kenya", radius=50, tier=1, timeout=15):
         """
-        Main entry point for scraping.
+        Main entry point for scraping with TIERED ARCHITECTURE.
+        Tier 1 (Fast - API-based): Google CSE, Twitter API, DuckDuckGo (5-second max return)
+        Tier 2 (Heavy - Playwright): Instagram, Google Maps, Facebook dynamic (Full deep scrape)
         """
-        print(f"Scraping {platform} for '{query}' in {location}...")
+        print(f"Scraping {platform} for '{query}' in {location} (Tier {tier}, Timeout {timeout}s)...")
+        results = []
         
-        # 1. Try SerpApi if key exists
-        if os.getenv("SERPAPI_KEY"):
-            return self.serpapi_search(query, location, source=platform.capitalize())
+        # 1. TIER 1: FAST (API / DDG)
+        if tier >= 1:
+            try:
+                # --- GOOGLE ---
+                if platform.lower() == "google":
+                    # Google CSE (Fast API)
+                    try:
+                        cse = GoogleCSEScraper()
+                        # CSE returns raw dicts, adapt to LeadScraper format
+                        # Use wrapper with timeout
+                        cse_results = self._run_with_timeout(cse.scrape, args=(query,), kwargs={'time_window_hours': 24}, timeout=timeout)
+                        if cse_results:
+                            for r in cse_results:
+                                results.append({
+                                    "source": "Google",
+                                    "link": r.get("url"),
+                                    "text": r.get("text"),
+                                    "location": location,
+                                    "user": "Web Result"
+                                })
+                    except Exception as e:
+                        print(f"Google CSE Error: {e}")
+                    
+                    # Supplement with DDG (Fast)
+                    ddg_g = self._run_with_timeout(self.duckduckgo_search, args=(query, location, "Google"), timeout=timeout)
+                    if ddg_g: results.extend(ddg_g)
+                
+                # --- TWITTER ---
+                elif platform.lower() == "twitter":
+                    # Use existing DDG-based Twitter search (Fast)
+                    tw_results = self._run_with_timeout(self.search_twitter, args=(query, location), timeout=timeout)
+                    if tw_results: results.extend(tw_results)
+                
+                # --- DUCKDUCKGO ---
+                elif platform.lower() == "duckduckgo":
+                    ddg_results = self._run_with_timeout(self.duckduckgo_search, args=(query, location, "DuckDuckGo"), timeout=timeout)
+                    if ddg_results: results.extend(ddg_results)
+                
+                # --- GENERIC FALLBACK FOR TIER 1 ---
+                else:
+                    # For other platforms requested in Tier 1, try DDG site search
+                    ddg_fb = self._run_with_timeout(self.duckduckgo_search, args=(query, location, platform.capitalize()), timeout=timeout)
+                    if ddg_fb: results.extend(ddg_fb)
             
-        # 2. Multi-source selection
-        if platform.lower() == "google":
-            # Combine DDG Google results and Direct Google
-            ddg_g = self.duckduckgo_search(query, location, source="Google")
-            direct_g = self.google_search_direct(query, location, source="Google")
-            return ddg_g + direct_g
+            except Exception as e:
+                print(f"Tier 1 Scraping Error: {e}")
+
+        # 2. TIER 2: HEAVY (PLAYWRIGHT)
+        if tier >= 2:
+            try:
+                # --- INSTAGRAM ---
+                if platform.lower() == "instagram":
+                    print("Starting Instagram Scraper (Tier 2)...")
+                    try:
+                        ig = InstagramScraper()
+                        ig_results = self._run_with_timeout(ig.scrape, args=(query,), kwargs={'time_window_hours': 24}, timeout=timeout)
+                        if ig_results:
+                            for r in ig_results:
+                                results.append({
+                                    "source": "Instagram",
+                                    "link": r.get("url"),
+                                    "text": r.get("text"),
+                                    "location": location,
+                                    "user": r.get("author")
+                                })
+                    except Exception as e:
+                        print(f"Instagram Scraper Error: {e}")
+
+                # --- FACEBOOK ---
+                elif platform.lower() == "facebook":
+                     print("Starting Facebook Scraper (Tier 2)...")
+                     try:
+                        fb = FacebookMarketplaceScraper()
+                        fb_results = self._run_with_timeout(fb.scrape, args=(query,), kwargs={'time_window_hours': 24}, timeout=timeout)
+                        if fb_results:
+                            for r in fb_results:
+                                results.append({
+                                    "source": "Facebook",
+                                    "link": r.get("url"),
+                                    "text": r.get("text"),
+                                    "location": location,
+                                    "user": r.get("author")
+                                })
+                     except Exception as e:
+                        print(f"Facebook Scraper Error: {e}")
+
+                # --- GOOGLE MAPS ---
+                elif platform.lower() == "google_maps":
+                     print("Starting Google Maps Scraper (Tier 2)...")
+                     try:
+                        gm = GoogleMapsScraper()
+                        gm_results = self._run_with_timeout(gm.scrape, args=(query,), kwargs={'time_window_hours': 24}, timeout=timeout)
+                        if gm_results:
+                            for r in gm_results:
+                                results.append({
+                                    "source": "Google Maps",
+                                    "link": r.get("url"),
+                                    "text": r.get("text"),
+                                    "location": location,
+                                    "user": r.get("author")
+                                })
+                     except Exception as e:
+                        print(f"Google Maps Scraper Error: {e}")
             
-        # 3. Default to DDG for social platforms
-        return self.duckduckgo_search(query, location, source=platform.capitalize())
+            except Exception as e:
+                print(f"Tier 2 Scraping Error: {e}")
+            
+        return results
 
 if __name__ == "__main__":
     scraper = LeadScraper()

@@ -2,35 +2,41 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 import os
 
-# Use SQLite for now, easily switch to PostgreSQL
+# Use PostgreSQL exclusively for production
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
-# If DATABASE_URL is empty after strip, fallback to local SQLite
 if not DATABASE_URL:
-    DATABASE_URL = "sqlite:///./intent_radar.db"
+    raise ValueError("DATABASE_URL environment variable is required for production.")
 
 # Render/Heroku fix: SQLAlchemy requires 'postgresql://' instead of 'postgres://'
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
+# Connection args
+if "sqlite" in DATABASE_URL:
+    # SQLite-specific config for local testing
+    connect_args = {"check_same_thread": False}
+    engine_args = {
+        "pool_pre_ping": True,
+        "pool_recycle": 1800
+    }
+else:
+    # PostgreSQL-specific config for production
+    connect_args = {"options": "-c statement_timeout=30000"}  # 30s statement timeout
+    engine_args = {
+        "pool_pre_ping": True,
+        "pool_recycle": 1800,  # Recycle every 30 mins
+        "pool_size": 10,       # Safe size for Railway
+        "max_overflow": 5
+    }
+
+# Create Engine with Pool Settings
+# pool_pre_ping=True handles "database has gone away" errors
 engine = create_engine(
     DATABASE_URL, 
-    connect_args={"check_same_thread": False, "timeout": 30} if "sqlite" in DATABASE_URL else {}
+    connect_args=connect_args,
+    **engine_args
 )
-
-# PROD_STRICT: Enable WAL mode for SQLite to prevent "database is locked" errors
-if "sqlite" in DATABASE_URL:
-    @event.listens_for(engine, "connect")
-    def set_sqlite_pragma(dbapi_connection, connection_record):
-        try:
-            cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA synchronous=NORMAL")
-            cursor.close()
-        except Exception as e:
-            # If we can't set WAL mode because it's locked, it might already be in WAL mode
-            # or will be set by another connection later. Don't crash.
-            pass
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

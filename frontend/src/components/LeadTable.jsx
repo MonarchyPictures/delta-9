@@ -54,7 +54,7 @@ const LeadTable = ({ leads, selected = [], setSelected, onStatusChange, onTap })
               <th className="px-6 py-4">Potential Buyer</th>
               <th className="px-6 py-4">Location</th>
               <th className="px-6 py-4">Intent</th>
-              <th className="px-6 py-4 text-right">Confidence</th>
+              <th className="px-6 py-4 text-right">Rank Score</th>
             </tr>
           </thead>
           <tbody className="text-sm">
@@ -62,7 +62,7 @@ const LeadTable = ({ leads, selected = [], setSelected, onStatusChange, onTap })
               const id = lead.lead_id || lead.id;
               const isSelected = selected.includes(id);
               const isRecent = lead.timestamp && (new Date() - new Date(lead.timestamp)) < 24 * 60 * 60 * 1000;
-              const isHighIntent = lead.intent_score >= 0.8;
+              const isHighIntent = (lead.ranked_score || lead.intent_score) >= 0.7;
               const hasWhatsApp = !!lead.whatsapp_link;
               
               return (
@@ -100,7 +100,7 @@ const LeadTable = ({ leads, selected = [], setSelected, onStatusChange, onTap })
                   </td>
                   <td className="px-6 py-4 text-right">
                     <span className="bg-blue-600/20 text-blue-400 px-3 py-1 rounded-full text-[10px] font-black border border-blue-500/20">
-                      {((lead.buyer_match_score || lead.intent_score || 0) * 100).toFixed(0)}%
+                      {((lead.ranked_score || lead.buyer_match_score || lead.intent_score || 0) * 100).toFixed(0)}%
                     </span>
                   </td>
                 </tr>

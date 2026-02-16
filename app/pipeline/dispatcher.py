@@ -1,7 +1,8 @@
-from fastapi import BackgroundTasks
+import asyncio
 import logging
 import time
 from typing import List, Dict, Any, Optional
+from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 from app.db.database import SessionLocal
 from app.ingestion import LiveLeadIngestor
@@ -10,17 +11,18 @@ from app.config import PIPELINE_MODE
 
 logger = logging.getLogger(__name__)
 
-def run_background_discovery(query: str, location: str):
+def run_background_discovery(query: str, location: str, tier: int = 2):
     """
     🛠️ Background Task: Continues discovery for the remaining queries 
     to populate cache and metrics after an early return.
+    Default to Tier 2 (Full) to ensure deep data is captured eventually.
     """
-    logger.info(f"BACKGROUND DISCOVERY: Starting full pass for '{query}' in {location}")
+    logger.info(f"BACKGROUND DISCOVERY: Starting full pass (Tier {tier}) for '{query}' in {location}")
     db = SessionLocal()
     try:
         ingestor = LiveLeadIngestor(db)
         # Run with early_return=False to ensure full coverage in background
-        leads = ingestor.fetch_from_external_sources(query, location, early_return=False)
+        leads = ingestor.fetch_from_external_sources(query, location, early_return=False, tier=tier)
         if leads:
             logger.info(f"BACKGROUND DISCOVERY: Saving {len(leads)} leads for '{query}'")
             ingestor.save_leads_to_db(leads)
@@ -30,25 +32,35 @@ def run_background_discovery(query: str, location: str):
     finally:
         db.close()
 
-async def run_pipeline(query: str, location: str, headers: Dict[str, Any] = None, background_tasks: BackgroundTasks = None) -> List[Dict[str, Any]]:
+async def run_pipeline(query: str, location: str, headers: Dict[str, Any] = None, background_tasks: BackgroundTasks = None, tier: int = 2) -> List[Dict[str, Any]]:
     """
     🎯 The Engine: Generic pipeline dispatcher.
     Expands query, fetches leads, scores them, and returns verified buyers.
     Includes Early Return logic for instant UX.
+    
+    tier=1: Fast (API-based) - 5 sec max return
+    tier=2: Full (API + Playwright)
     """
     start_time = time.time()
     db = SessionLocal()
     try:
         # 1. Expand Query (Generic expansion)
         expanded_queries = expand_query(query)
-        logger.info(f"PIPELINE: Expanding '{query}' -> {expanded_queries}")
+        logger.info(f"PIPELINE: Expanding '{query}' -> {expanded_queries} (Tier {tier})")
 
         ingestor = LiveLeadIngestor(db)
         all_results = []
 
         # 2. Run enabled scrapers for the primary query first (Speed Optimized)
         # We use early_return=True to return as soon as we have >= 2 signals
-        primary_leads = ingestor.fetch_from_external_sources(query, location, early_return=True)
+        # CRITICAL: Run blocking ingestion in thread to avoid blocking async loop
+        primary_leads = await asyncio.to_thread(
+            ingestor.fetch_from_external_sources, 
+            query, 
+            location, 
+            early_return=True, 
+            tier=tier
+        )
         all_results.extend(primary_leads)
 
         # 🚀 EARLY RETURN CHECK: If we found enough signals from the primary query, 
@@ -56,18 +68,24 @@ async def run_pipeline(query: str, location: str, headers: Dict[str, Any] = None
         if len(primary_leads) >= 2:
             logger.info(f"PIPELINE SPEED: Early return triggered with {len(primary_leads)} signals.")
             if background_tasks:
-                # 1. Complete the full pass for the primary query in background
-                background_tasks.add_task(run_background_discovery, query, location)
+                # 1. Complete the full pass for the primary query in background (Always Tier 2 for deep data)
+                background_tasks.add_task(run_background_discovery, query, location, tier=2)
                 # 2. Complete expanded queries in background
                 for eq in expanded_queries:
                     if eq != query:
-                        background_tasks.add_task(run_background_discovery, eq, location)
+                        background_tasks.add_task(run_background_discovery, eq, location, tier=2)
         else:
             # 3. Fallback: Run expanded queries sequentially if primary query was dry
             for q in expanded_queries:
                 if q == query: continue # Already did this
                 normalized_query = q.strip()
-                leads = ingestor.fetch_from_external_sources(normalized_query, location, early_return=True)
+                leads = await asyncio.to_thread(
+                    ingestor.fetch_from_external_sources, 
+                    normalized_query, 
+                    location, 
+                    early_return=True, 
+                    tier=tier
+                )
                 all_results.extend(leads)
                 if len(all_results) >= 2:
                     break

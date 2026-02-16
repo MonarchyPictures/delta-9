@@ -138,7 +138,7 @@ const Settings = () => {
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 text-[10px] text-white/40 font-bold uppercase tracking-widest">
                     <Globe size={12} />
-                    <span>Categories: {data.categories.join(', ')}</span>
+                    <span>Categories: {data.categories ? data.categories.join(', ') : 'All'}</span>
                   </div>
                   
                   {data.metrics && (

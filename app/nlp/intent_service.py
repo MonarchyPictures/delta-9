@@ -1,15 +1,23 @@
+import logging
 import re
 from datetime import datetime, timedelta
 
-from ..intelligence.intent import BUYER_PHRASES
+from ..intelligence.intent import BUYER_PATTERNS
+
+logger = logging.getLogger(__name__)
 
 class BuyingIntentNLP:
     def __init__(self):
-        # Disable spacy on Python 3.12+ due to Pydantic V1 incompatibility
-        self.nlp = None
-        # self.nlp = spacy.load("en_core_web_sm")
+        try:
+            import spacy
+            # Attempt to load spaCy model safely
+            self.nlp = spacy.load("en_core_web_sm")
+            logger.info("✅ spaCy model loaded successfully.")
+        except Exception as e:
+            logger.warning(f"⚠️ spaCy model failed to load (Pydantic V1/V2 conflict likely): {e}. Using Regex Fallback.")
+            self.nlp = None
         
-        self.intent_patterns = BUYER_PHRASES
+        self.intent_patterns = BUYER_PATTERNS
 
     def extract_entities(self, text, category_config=None):
         """Extract products, locations, names, and prices."""
@@ -290,7 +298,7 @@ class BuyingIntentNLP:
             if "?" in text_lower and any(kw in text_lower for kw in ["get", "buy", "find", "pata", "iko"]):
                 return "BUYER"
             
-            print(f"❌ Rejected: No explicit buyer signal in: {text_lower[:50]}...")
+            logger.info(f"❌ Rejected: No explicit buyer signal in: {text_lower[:50]}...")
             return "UNCLEAR"
         
         # RULE: Personal Intent Verification (Must be first-person or question)
@@ -306,18 +314,18 @@ class BuyingIntentNLP:
         if has_personal_signal or is_buyer_question:
             # Additional check: length (too short posts are usually spam or unclear)
             if len(text_lower) < 10 and not is_buyer_question:
-                print(f"❌ Rejected: Too short: {text_lower[:50]}...")
+                logger.info(f"❌ Rejected: Too short: {text_lower[:50]}...")
                 return "UNCLEAR"
             
             # Final check to avoid e-commerce noise: "price is", "buy now"
             if any(s in text_lower for s in ["price is", "buy now", "order today"]) and not "looking for" in text_lower:
-                print(f"❌ Rejected: E-commerce noise: {text_lower[:50]}...")
+                logger.info(f"❌ Rejected: E-commerce noise: {text_lower[:50]}...")
                 return "SELLER"
             
-            print(f"✅ Accepted: BUYER intent found in: {text_lower[:50]}...")
+            logger.info(f"✅ Accepted: BUYER intent found in: {text_lower[:50]}...")
             return "BUYER"
         
-        print(f"❌ Rejected: No personal intent signal in: {text_lower[:50]}...")
+        logger.info(f"❌ Rejected: No personal intent signal in: {text_lower[:50]}...")
         return "UNCLEAR"
 
     def calculate_intent_score(self, text):
@@ -333,6 +341,11 @@ class BuyingIntentNLP:
             "inbox me", "wtb", "ready to buy", "trying to find", "trying to get",
             "want to get", "looking to find", "in search of", "natafuta", "nahitaji"
         ]
+        # Add imported BUYER_PATTERNS to high_intent
+        for p in self.intent_patterns:
+            if p not in high_intent:
+                high_intent.append(p)
+
         medium_intent = [
             "price for", "how much is", "cost of", "recommendations for", 
             "best place for", "who has", "where is", "anyone know where",

@@ -101,19 +101,13 @@ def seed_data():
             "name": "Nairobi Tire Hunter",
             "query": "Tires",
             "location": "Nairobi",
-            "radius": 50,
-            "min_intent_score": 0.85,
-            "is_active": 1,
-            "enable_alerts": 1
+            "active": 1
         },
         {
             "name": "National Tank Scout",
             "query": "Tanks",
             "location": "Kenya",
-            "radius": 500,
-            "min_intent_score": 0.7,
-            "is_active": 1,
-            "enable_alerts": 1
+            "active": 1
         }
     ]
 

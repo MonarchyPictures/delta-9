@@ -19,7 +19,8 @@ async def search(request: Request, payload: dict, background_tasks: BackgroundTa
         query=query, 
         location=location, 
         headers=request.headers,
-        background_tasks=background_tasks
+        background_tasks=background_tasks,
+        tier=1 # ⚡ MANUAL SEARCH IS ALWAYS TIER 1 (FAST)
     ) 
 
     # 🎯 DISPLAY LAYER FILTERING (Save Everything, Rank Later)

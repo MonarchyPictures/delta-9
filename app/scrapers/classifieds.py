@@ -28,19 +28,44 @@ class ClassifiedsScraper(BaseScraper):
         logger.info(f"CLASSIFIEDS: Found {len(ads)} ads")
         
         for ad in ads:
-            link_tag = ad.select_one('a.b-list-advert-base__item-text-title')
-            snippet_tag = ad.select_one('.b-list-advert-base__description-text')
+            # Check if the ad element itself is the link
+            if ad.name == 'a':
+                link_tag = ad
+            else:
+                # Try specific selector first, then fallback to any link
+                link_tag = ad.select_one('a.b-list-advert-base__item-text-title') or ad.select_one('a')
+            
+            snippet_tag = ad.select_one('.b-list-advert-base__description-text') or ad.select_one('.qa-advert-description')
             price_tag = ad.select_one('.qa-advert-price')
             
             if not link_tag:
                 continue
-                
-            link = "https://jiji.co.ke" + link_tag.get('href')
+            
+            href = link_tag.get('href')
+            if not href:
+                continue
+
+            # NEW: Clean URL to remove tracking params (Fixes idempotency)
+            if "?" in href:
+                href = href.split("?")[0]
+
+            link = href if href.startswith('http') else f"https://jiji.co.ke{href}"
             title = link_tag.get_text(strip=True)
             snippet = snippet_tag.get_text(strip=True) if snippet_tag else ""
             price = price_tag.get_text(strip=True) if price_tag else ""
             
+            # Jiji often puts price in title or nearby.
+            # We want to make sure the text feels like a "post"
             full_text = f"{title}. {snippet}. Price: {price}"
+            
+            # Helper to clean Jiji text
+            if "KSh" in title and "KSh" in price:
+                # Deduplicate price if it's in title
+                full_text = f"{title}. {snippet}"
+            
+            # Ensure we capture "Job" or "Hiring" context if present in URL or category
+            if "job" in link or "work" in link:
+                 full_text += " [Job/Service Listing]"
             
             # Check if it looks like a buyer (Jiji has "Wanted" category or users post in titles)
             # For now, we emit all and let the intent scorer decide

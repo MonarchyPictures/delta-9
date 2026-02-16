@@ -1,6 +1,5 @@
 import logging
 import random
-import time
 from abc import ABC, abstractmethod 
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -87,7 +86,7 @@ class BaseScraper(ABC):
                 ) 
         
                 page = context.new_page() 
-                page.goto(url, timeout=15000) 
+                page.goto(url, timeout=45000) 
         
                 for text in ["Accept", "Accept all", "I agree"]: 
                     try: 
@@ -117,7 +116,8 @@ class BaseScraper(ABC):
                             print(f"PLAYWRIGHT: All selectors failed, but got {html_len} chars of HTML")
                             logger.warning(f"PLAYWRIGHT: Both primary and fallback selectors failed at {url}, HTML len: {html_len}")
         
-                time.sleep(random.uniform(1.5, 3.0)) 
+                # Use Playwright's native wait instead of blocking time.sleep
+                page.wait_for_timeout(random.uniform(1500, 3000))
         
                 html = page.content() 
                 browser.close() 

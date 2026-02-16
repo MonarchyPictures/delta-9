@@ -11,15 +11,16 @@ logger = logging.getLogger("ScraperRegistry")
 # 🔒 Enable / Disable Scrapers (Generic)
 # FULLY GENERIC: No category-specific prioritization.
 ENABLED_SCRAPERS = [
-    "FacebookMarketplaceScraper",
-    "GoogleMapsScraper",
+    # "FacebookMarketplaceScraper",
+    # "GoogleMapsScraper",
     "ClassifiedsScraper",
-    "TwitterScraper",
+    # "TwitterScraper",
     "RedditScraper",
-    "InstagramScraper",
-    "GoogleCSEScraper",
-    "GoogleScraper",
-    "WhatsAppPublicGroupScraper"
+    # "InstagramScraper",
+    # "GoogleCSEScraper",
+    # "GoogleScraper",
+    # "WhatsAppPublicGroupScraper",
+    "DuckDuckGoScraper"
 ]
 
 def get_active_scrapers() -> List[str]:
@@ -34,6 +35,7 @@ def get_active_scrapers() -> List[str]:
         "facebook": "FacebookMarketplaceScraper",
         "twitter": "TwitterScraper",
         "reddit": "RedditScraper",
+        "classifieds": "ClassifiedsScraper",
         "google_cse": "GoogleCSEScraper"
     }
     
@@ -130,6 +132,15 @@ SCRAPER_REGISTRY = {
         "enabled_until": None
     },
     "WhatsAppPublicGroupScraper": {
+        "enabled": True,
+        "core": True,
+        "mode": "production",
+        "cost": "free",
+        "noise": "low",
+        "categories": ["all"],
+        "enabled_until": None
+    },
+    "DuckDuckGoScraper": {
         "enabled": True,
         "core": True,
         "mode": "production",

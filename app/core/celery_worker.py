@@ -2,6 +2,7 @@ from celery import Celery
 import os
 import sys
 import logging
+import hashlib
 from datetime import datetime, timedelta
 
 # Add project root to sys.path for absolute imports
@@ -36,6 +37,8 @@ try:
 except Exception:
     logger.warning("Redis not found. Falling back to SQLite broker.")
     celery_app.conf.broker_url = FALLBACK_BROKER_URL
+    celery_app.conf.task_always_eager = True
+    celery_app.conf.task_eager_propagates = True
 
 celery_app.conf.update(
     task_serializer="json",
@@ -44,9 +47,9 @@ celery_app.conf.update(
     timezone="Africa/Nairobi",
     enable_utc=True,
     beat_schedule={
-        "check-agents-every-15-min": {
+        "check-agents-every-minute": {
             "task": "run_all_agents",
-            "schedule": 900.0, # Run every 15 minutes
+            "schedule": 60.0, # Run every minute
         },
         "cleanup-every-12-hours": {
             "task": "cleanup_old_leads",
@@ -56,7 +59,7 @@ celery_app.conf.update(
 )
 
 @celery_app.task(name="specialops_mission_task")
-def specialops_mission_task(query: str, location: str = "Kenya", agent_id: int = None):
+def specialops_mission_task(query: str, location: str = "Kenya", agent_id: str = None):
     """
     MASTER AGENT MISSION: Autonomous web intelligence routing.
     Follows the SpecialOps decision logic for search, crawl, and extraction.
@@ -172,23 +175,40 @@ def run_all_agents():
         now = datetime.now()
         # Find active agents where next_run_at is reached or never set
         active_agents = db.query(models.Agent).filter(
-            models.Agent.is_active == 1,
+            models.Agent.active == True,
             (models.Agent.next_run_at <= now) | (models.Agent.next_run_at == None)
         ).all()
         
+        triggered_count = 0
         for agent in active_agents:
-            # Check if agent has expired (duration_days reached)
-            if agent.created_at:
+            # Check self-termination condition (end_time reached)
+            if agent.end_time and now >= agent.end_time:
+                logger.info(f"Agent '{agent.name}' (ID: {agent.id}) has reached end_time. Self-terminating.")
+                agent.active = False
+                agent.next_run_at = None # Clear schedule
+                db.commit()
+                continue
+            
+            # Fallback for older agents without end_time: Calculate from duration
+            elif not agent.end_time and agent.created_at:
                 expiry_time = agent.created_at + timedelta(days=agent.duration_days)
                 if now > expiry_time:
-                    logger.info(f"Agent '{agent.name}' (ID: {agent.id}) has expired. Deactivating.")
-                    agent.is_active = 0
+                    logger.info(f"Agent '{agent.name}' (ID: {agent.id}) has expired (duration). Deactivating.")
+                    agent.active = False
+                    agent.next_run_at = None
                     db.commit()
                     continue
             
-            run_agent_task.delay(agent.id)
+            # Dispatch task
+            run_agent_task.delay(str(agent.id))
             
-        return f"Triggered {len(active_agents)} agents"
+            # Update next run timestamp IMMEDIATELY to prevent duplicate runs
+            # This locks the agent until the next cycle
+            agent.next_run_at = now + timedelta(hours=agent.interval_hours or 2)
+            db.commit()
+            triggered_count += 1
+            
+        return f"Triggered {triggered_count} agents"
     except Exception as e:
         logger.error(f"Error in run_all_agents: {e}")
         return f"Error: {e}"
@@ -196,17 +216,19 @@ def run_all_agents():
         db.close()
 
 @celery_app.task(name="scrape_platform_task")
-def scrape_platform_task(platform: str, query: str, location: str = "Kenya", agent_id: int = None, radius: int = 50, min_intent: float = 0.7):
+def scrape_platform_task(platform: str, query: str, location: str = "Kenya", agent_id: str = None, radius: int = 50, min_intent: float = 0.7, tier: int = 2, timeout: int = 15):
     """Background task to scrape a platform and save leads."""
-    from scraper import LeadScraper
+    from app.scrapers.scraper import LeadScraper
     from app.utils.normalization import LeadValidator
-    from app.utils.outreach import OutreachEngine
+    from app.intelligence.ranking import RankingEngine
     from app.nlp.duplicate_detector import DuplicateDetector
+    from app.utils.outreach import OutreachEngine
     from app.core.compliance import ComplianceManager
     
     scraper = LeadScraper()
     validator = LeadValidator()
-    outreach = OutreachEngine()
+    ranking_engine = RankingEngine()
+    outreach_engine = OutreachEngine()
     detector = DuplicateDetector()
     compliance = ComplianceManager()
     
@@ -219,7 +241,9 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
     # 2. Scrape
     try:
         # Pass radius to scraper if supported
-        raw_results = scraper.scrape_platform(platform.lower(), query, location, radius=radius)
+        # Tier 2 = Full Deep Scrape (API + Playwright) for Agents
+        # Timeout = 15s per scraper to prevent blocking
+        raw_results = scraper.scrape_platform(platform.lower(), query, location, radius=radius, tier=tier, timeout=timeout)
     except Exception as e:
         logger.error(f"Scraper failed for {platform}: {e}")
         return f"Scraper error on {platform}"
@@ -227,6 +251,9 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
     db = SessionLocal()
     processed_count = 0
     alert_count = 0
+    
+    # NEW: Accumulate high-value leads for a single summary notification
+    high_value_leads = []
     
     try:
         # Fetch agent if id provided
@@ -244,12 +271,89 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
             try:
                 if "source" not in raw:
                     raw["source"] = platform.capitalize()
+                
+                # -------------------------------------------------------------------------
+                # NEW: SAVE EVERYTHING TO AGENT_RAW_LEADS (Before any processing)
+                # -------------------------------------------------------------------------
+                raw_lead = None
+                try:
+                    # 1. Prepare Data
+                    raw_text = raw.get("body") or raw.get("text") or raw.get("data", {}).get("raw_text", "") or "N/A"
+                    phone = raw.get("phone") or raw.get("contact", {}).get("phone")
+                    
+                    # 2. Compute Hash (Normalized)
+                    # We use MD5 for speed/size. Collisions are rare enough for this text data.
+                    content_hash = hashlib.md5(raw_text.strip().lower().encode('utf-8')).hexdigest()
+                    
+                    # 3. Deduplication Check (Per Agent)
+                    # "Avoid storing same signal twice per agent"
+                    is_duplicate = False
+                    if agent_id:
+                        # Check content hash
+                        existing_hash = db.query(models.AgentRawLead).filter(
+                            models.AgentRawLead.agent_id == agent_id,
+                            models.AgentRawLead.content_hash == content_hash
+                        ).first()
+                        
+                        if existing_hash:
+                            is_duplicate = True
+                            logger.info(f"Duplicate signal (hash) for agent {agent_id}. Skipping storage.")
+                            
+                        # Check phone (if valid)
+                        elif phone and len(str(phone)) > 5:
+                             existing_phone = db.query(models.AgentRawLead).filter(
+                                models.AgentRawLead.agent_id == agent_id,
+                                models.AgentRawLead.phone == str(phone)
+                            ).first()
+                             if existing_phone:
+                                is_duplicate = True
+                                logger.info(f"Duplicate signal (phone) for agent {agent_id}. Skipping storage.")
+                    
+                    if is_duplicate:
+                         continue
+
+                    raw_lead = models.AgentRawLead(
+                        agent_id=agent_id,
+                        raw_text=raw_text,
+                        content_hash=content_hash,
+                        phone=phone,
+                        source=raw["source"],
+                        source_url=raw.get("href") or raw.get("url") or raw.get("post_link"),
+                        processed=0
+                    )
+                    db.add(raw_lead)
+                    # We commit raw leads immediately to ensure they are captured even if processing fails later
+                    db.commit()
+                    db.refresh(raw_lead)
+                except Exception as raw_e:
+                    logger.error(f"Failed to save AgentRawLead: {raw_e}")
+                    # Don't stop processing, but log the error. 
+                    # In a strict "save everything" mode, this is critical, but we continue to try and process.
                     
                 normalized = validator.normalize_lead(raw, db=db)
                 if not normalized:
                     logger.info(f"Skipping empty normalization for lead from {platform}")
                     continue
                 
+                # Update Raw Lead with analysis data
+                if raw_lead:
+                    raw_lead.geo_score = normalized.get("geo_score", 0.0)
+                    raw_lead.intent_score = normalized.get("intent_score", 0.0)
+                    raw_lead.confidence_score = normalized.get("confidence_score", 0.0)
+                    # We'll calculate ranked_score below and update it
+                    raw_lead.processed = 1
+                    # db.add(raw_lead) -> Wait to add with ranked_score
+                
+                # 🎯 RANKING ENGINE (Runs After Save/Normalization)
+                ranked_score = ranking_engine.calculate_score(normalized)
+                priority_class = ranking_engine.classify_lead(ranked_score)
+                
+                if raw_lead:
+                    raw_lead.ranked_score = ranked_score
+                    db.add(raw_lead)
+                
+                logger.info(f"Lead Ranked: Score={ranked_score}, Class={priority_class}")
+
                 # Metadata check (Replaces hard skip)
                 if normalized.get("intent_score", 0) < min_intent:
                     logger.info(f"Signal recorded with low intent score: {normalized.get('intent_score')} < {min_intent} (threshold for agent {agent_id})")
@@ -274,7 +378,7 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
                     # We save it anyway, but we might want to flag it
 
                 # Check for history of non-response
-                has_bad_history = outreach.check_non_response_history(
+                has_bad_history = outreach_engine.check_non_response_history(
                     db, 
                     phone=normalized.get("contact_phone"), 
                     email=normalized.get("contact_email")
@@ -284,7 +388,7 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
                 lead = models.Lead(
                     id=normalized["id"],
                     source_platform=normalized["source_platform"],
-                    post_link=normalized["post_link"],
+                    source_url=normalized["source_url"],
                     location_raw=normalized.get("location_raw"),
                     buyer_request_snippet=normalized["buyer_request_snippet"],
                     product_category=normalized["product_category"],
@@ -317,6 +421,9 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
                     neighborhood=normalized.get("neighborhood"),
                     local_pickup_preference=normalized.get("local_pickup_preference", 0),
                     delivery_constraints=normalized.get("delivery_constraints"),
+                    
+                    # 🎯 RANKING ENGINE
+                    ranked_score=ranked_score,
                     
                     # NEW: Deal Readiness
                     decision_authority=normalized.get("decision_authority", 0),
@@ -358,12 +465,27 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
                     verification_badges=normalized.get("verification_badges", []),
                     is_genuine_buyer=normalized.get("is_genuine_buyer", 1),
                     last_activity=normalized.get("last_activity"),
-                    status=models.ContactStatus.NOT_CONTACTED,
+                    status=models.CRMStatus.NEW,
                     notes=normalized.get("notes", "")
                 )
                 
                 # Check if lead exists by link
-                existing = db.query(models.Lead).filter(models.Lead.post_link == lead.post_link).first()
+                existing = db.query(models.Lead).filter(models.Lead.source_url == lead.source_url).first()
+                
+                if existing:
+                    # Update existing lead with new info if better
+                    if lead.intent_score > existing.intent_score:
+                        existing.intent_score = lead.intent_score
+                        existing.ranked_score = lead.ranked_score
+                        existing.buyer_request_snippet = lead.buyer_request_snippet
+                        logger.info(f"Updated existing lead {existing.id} with better score")
+                    # We still use 'lead' as reference for notification logic below, but mapped to 'existing.id'
+                    lead = existing
+                else:
+                    db.add(lead)
+                    # Must flush to get ID if we generated it, but normalized["id"] should be set
+                    # db.flush() 
+
                 
                 # Check if this phone already exists for this agent (Duplicate Prevention)
                 is_phone_duplicate = False
@@ -378,33 +500,49 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
                         logger.info(f"Skipping lead for agent {agent.id}: Phone {lead.contact_phone} already discovered by this agent.")
 
                 if not existing and not is_phone_duplicate:
-                    # REAL-TIME ALERT LOGIC
-                    if agent and agent.enable_alerts:
-                        # Update notes with alert info
-                        lead.notes = f"ALERT MATCH: '{agent.query}' in {agent.location}. Found via {platform} Agent '{agent.name}'.\n" + (lead.notes or "")
-                        
-                        # Create notification
-                        notification = models.Notification(
-                            lead_id=lead.id,
-                            agent_id=agent.id,
-                            message=f"🚨 REAL-TIME ALERT: New lead for '{agent.query}' found on {platform}!"
-                        )
-                        db.add(notification)
-                        
-                        # Store in AgentLead table
+                    # 🎯 RANKING ENGINE: PRIORITY ROUTING
+                    # High = Immediate Notification
+                    # Medium = Badge Only (Silent Store with visual indicator)
+                    # Low = Silent (Archive)
+                    
+                    if agent:
+                        if priority_class == "HIGH":
+                            # Update notes with alert info
+                            lead.notes = f"🚨 URGENT MATCH: '{agent.query}' in {agent.location}. Score: {ranked_score:.2f}\n" + (lead.notes or "")
+                            
+                            # Add to batch for summary notification
+                            high_value_leads.append(lead)
+                            
+                            # Mark raw lead as notified (so we know it's been handled)
+                            if raw_lead:
+                                raw_lead.notified = 1
+                            
+                        elif priority_class == "MEDIUM":
+                            # Update notes
+                            lead.notes = f"✨ STANDARD MATCH: '{agent.query}' in {agent.location}. Score: {ranked_score:.2f}\n" + (lead.notes or "")
+                            
+                            # Add to batch for summary notification
+                            high_value_leads.append(lead)
+                            
+                            if raw_lead:
+                                raw_lead.notified = 1
+                            
+                        elif priority_class == "LOW":
+                            # Mark as low priority / archive
+                            lead.notes = f"[LOW PRIORITY] Score {ranked_score:.2f}. " + (lead.notes or "")
+                            
+                        # Always link to agent
                         agent_lead = models.AgentLead(
                             agent_id=agent.id,
                             lead_id=lead.id
                         )
                         db.add(agent_lead)
-                        
-                        alert_count += 1
                     
                     db.add(lead)
                     processed_count += 1
                 elif existing and not is_phone_duplicate:
                     # Lead exists in system but first time for this specific agent
-                    if agent and agent.enable_alerts:
+                    if agent:
                         # Check if agent already has this specific lead record
                         already_linked = db.query(models.AgentLead).filter(
                             models.AgentLead.agent_id == agent.id,
@@ -412,13 +550,13 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
                         ).first()
                         
                         if not already_linked:
-                            # Create notification for existing lead
-                            notification = models.Notification(
-                                lead_id=existing.id,
-                                agent_id=agent.id,
-                                message=f"🚨 RADAR MATCH: Agent '{agent.name}' found an existing lead matching '{agent.query}'!"
-                            )
-                            db.add(notification)
+                            # 🎯 RANKING ENGINE: PRIORITY ROUTING (Existing Lead)
+                            if priority_class in ["HIGH", "MEDIUM"]:
+                                # Add to batch for summary notification
+                                high_value_leads.append(existing)
+                                
+                                if raw_lead:
+                                    raw_lead.notified = 1
                             
                             # Store link
                             agent_lead = models.AgentLead(
@@ -426,10 +564,24 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
                                 lead_id=existing.id
                             )
                             db.add(agent_lead)
-                            alert_count += 1
             except Exception as e:
                 logger.error(f"Error processing lead from {platform}: {e}")
                 continue
+        
+        # -------------------------------------------------------------------------
+        # NEW: BATCH NOTIFICATION (Per Scrape Run)
+        # -------------------------------------------------------------------------
+        if agent and high_value_leads:
+            count = len(high_value_leads)
+            # Create ONE summary notification for this run
+            # e.g. "Agent 'Water Tanks': 3 New High-Intent Leads"
+            notification = models.Notification(
+                lead_id=high_value_leads[0].id, # Link to the first one for reference
+                agent_id=agent.id,
+                message=f"Agent '{agent.name}': {count} New High-Intent Leads found on {platform}."
+            )
+            db.add(notification)
+            alert_count = 1 # One notification sent
 
         db.commit()
     except Exception as e:
@@ -442,8 +594,15 @@ def scrape_platform_task(platform: str, query: str, location: str = "Kenya", age
     return f"Processed {processed_count} leads ({alert_count} alerts) from {platform} in {location}"
 
 @celery_app.task(name="run_agent_task")
-def run_agent_task(agent_id: int):
-    """Run discovery for a single agent."""
+def run_agent_task(agent_id: str):
+    """
+    Run discovery for a single agent following the strict flow:
+    1. Call search pipeline (Tier 2 Deep Scrape)
+    2. Save ALL raw leads (handled in scrape_platform_task)
+    3. Score & Rank leads (handled in scrape_platform_task)
+    4. Mark high score as notified (handled in scrape_platform_task)
+    5. Update next_run_at (handled in scheduler to prevent race conditions)
+    """
     db = SessionLocal()
     try:
         agent = db.query(models.Agent).filter(models.Agent.id == agent_id).first()
@@ -451,24 +610,28 @@ def run_agent_task(agent_id: int):
             logger.error(f"Agent {agent_id} not found in database.")
             return f"Agent {agent_id} not found"
         
-        logger.info(f"EXECUTING: Agent '{agent.name}' (ID: {agent.id}) - Query: '{agent.query}' in {agent.location}")
+        logger.info(f"EXECUTING Agent Flow for '{agent.name}' (ID: {agent.id})")
+        logger.info(f"1. Calling Search Pipeline (Tier 2, Async)...")
         
         platforms = ["google", "facebook", "reddit", "tiktok", "twitter"]
         for platform in platforms:
+            # We trigger the platform scrape task which handles:
+            # -> Save Raw -> Score -> Rank -> Notify
             scrape_platform_task.delay(
                 platform, 
                 agent.query, 
                 agent.location, 
-                agent.id,
-                radius=agent.radius,
-                min_intent=agent.min_intent_score
+                str(agent.id),
+                radius=50, 
+                min_intent=0.0, # Save everything (Rank Later)
+                tier=2, # 🐢 FULL DEEP SCRAPE (Tier 1 + Tier 2)
+                timeout=15 # 15s Timeout per scraper
             )
             
-        # Update last run and next run timestamps
-        agent.last_run = datetime.now()
-        agent.next_run_at = agent.last_run + timedelta(hours=agent.interval_hours or 2)
-        db.commit()
-        return f"Agent {agent.name} triggered discovery on {len(platforms)} platforms. Next run: {agent.next_run_at}"
+        # Note: next_run_at is updated in run_all_agents BEFORE calling this 
+        # to prevent scheduler race conditions.
+        
+        return f"Agent {agent.name} discovery initiated on {len(platforms)} platforms."
     except Exception as e:
         db.rollback()
         logger.error(f"CRITICAL: Agent {agent_id} execution failed. Error: {e}")

@@ -19,26 +19,50 @@ class FacebookMarketplaceScraper(BaseScraper):
             url = f"https://www.facebook.com/marketplace/search?query={query}"
             location_name = "Global"
         
-        # html = self.get_page_content(url, wait_selector="div[role='feed']") 
-        html = None # Placeholder
+        html = self.get_page_content(url, wait_selector="div[role='feed']") 
+        # html = None # Placeholder
         
         if not html:
             return []
  
         results = [] 
-        items = re.findall(r'/marketplace/item/\d+', html) 
- 
-        for item in list(set(items))[:10]: 
-            link = f"https://www.facebook.com{item}"
+        # items = re.findall(r'/marketplace/item/\d+', html) 
+        
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        # Facebook marketplace items are usually in a feed
+        # Selectors change frequently, so we use a broad approach + regex for links
+        links = soup.find_all('a', href=re.compile(r'/marketplace/item/\d+'))
+        
+        processed_links = set()
+
+        for link_tag in links[:10]: 
+            href = link_tag.get('href')
+            if not href or href in processed_links:
+                continue
             
-            snippet = f"Post about {query}: Looking for {query} in {location_name} - price and details please."
+            processed_links.add(href)
+            link = f"https://www.facebook.com{href}"
             
+            # Try to extract text from the link tag or parent
+            text = link_tag.get_text(strip=True)
+            
+            # If text is empty, look for parent text (often the link wraps an image and text is sibling or parent)
+            if not text:
+                parent = link_tag.find_parent('div')
+                if parent:
+                    text = parent.get_text(strip=True)
+            
+            if not text:
+                continue
+
             # 🎯 DUMB SCRAPER: Standardized Signal Output
             signal = ScraperSignal(
                 source=self.source,
-                text=snippet,
+                text=text,
                 author="Facebook User",
-                contact=self.extract_contact_info(f"{snippet} {link}"),
+                contact=self.extract_contact_info(f"{text} {link}"),
                 location=location_name,
                 url=link,
                 timestamp=datetime.now(timezone.utc).isoformat()

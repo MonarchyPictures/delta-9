@@ -78,32 +78,6 @@ const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange, onTap }) =>
     return phone;
   };
 
-  const handleUnlock = async (e) => {
-    e.stopPropagation();
-    try {
-      const apiUrl = getApiUrl();
-      const apiKey = getApiKey();
-      const response = await fetch(`${apiUrl}/api/leads/${lead.lead_id}/unlock`, {
-        method: 'POST',
-        headers: { 
-          'X-API-Key': apiKey,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.status === 402) {
-        alert("💰 Insufficient Credits: Please top up your wallet to unlock this Hot Lead (Cost: KES 150).");
-        return;
-      }
-
-      if (response.ok) {
-        alert("✅ Lead Unlocked! You can now access the contact details.");
-        if (onStatusChange) onStatusChange(lead.lead_id, lead.status); // Trigger refresh in parent
-      }
-    } catch (err) {
-      console.error("Unlock error:", err);
-    }
-  };
 
   const handleContact = async (e) => {
     e.stopPropagation();
@@ -247,8 +221,10 @@ const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange, onTap }) =>
               {lead.buyer_name || 'Verified Buyer'}
               {lead.phone && <span className="text-green-500"><ShieldCheck size={12} /></span>}
             </div>
-            <div className={`text-white/40 text-[10px] font-black uppercase tracking-widest ${lead.is_hot_lead && !lead.is_unlocked ? 'blur-sm select-none' : ''}`}>
-              {lead.phone ? displayPhone(lead.phone) : 'Contact via Platform'}
+            <div className="text-white/40 text-[10px] font-black uppercase tracking-widest">
+              <p className="text-green-400 font-medium"> 
+                📞 {lead.phone || "No phone found"} 
+              </p> 
             </div>
           </div>
         </div>
@@ -294,52 +270,21 @@ const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange, onTap }) =>
 
         {/* Suggested Outreach Section */}
         {(localOutreach || lead.outreach_suggestion) && (
-          <div className={`mb-6 p-4 rounded-xl bg-blue-500/5 border border-blue-500/10 relative overflow-hidden group/suggestion ${lead.is_hot_lead && !lead.is_unlocked ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
-            <div className="absolute top-0 left-0 w-1 h-full bg-blue-500/20" />
-            <div className="flex justify-between items-center mb-2">
-              <div className="text-[10px] font-black text-blue-500 uppercase tracking-widest flex items-center gap-1.5">
-                <Zap size={10} fill="currentColor" />
-                AI Outreach Signal
-              </div>
-              <div className="flex gap-2">
-                <button 
-                  onClick={handleGenerateOutreach}
-                  disabled={isGenerating}
-                  className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-widest bg-white/5 text-white/40 border border-white/10 hover:bg-white/10 transition-all disabled:opacity-50 cursor-pointer"
-                >
-                  <Activity size={10} className={isGenerating ? "animate-spin" : ""} />
-                  {isGenerating ? 'GENERATING...' : 'REGENERATE'}
-                </button>
-                <button 
-                  onClick={handleCopyOutreach}
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer ${
-                    copied 
-                      ? 'bg-green-500/20 text-green-500 border border-green-500/30' 
-                      : 'bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20'
-                  }`}
-                >
-                  {copied ? <Check size={10} /> : <Copy size={10} />}
-                  {copied ? 'COPIED' : 'COPY'}
-                </button>
-              </div>
-            </div>
-            <p className="text-white/80 text-xs italic font-medium leading-relaxed">
-              "{localOutreach || lead.outreach_suggestion}"
-            </p>
+          <div className="bg-slate-900 p-4 rounded-xl mt-4 border border-slate-700"> 
+            <div className="flex justify-between items-center mb-2"> 
+              <span className="text-sm text-slate-400"> 
+                ✨ AI Outreach Signal 
+              </span> 
+            </div> 
+            <p className="text-slate-200 italic"> 
+              {localOutreach || lead.outreach_suggestion} 
+            </p> 
           </div>
         )}
 
         {/* Primary Actions - TAP + COPY */}
         <div className="flex gap-3">
-          {lead.is_hot_lead && !lead.is_unlocked ? (
-            <button
-              onClick={handleUnlock}
-              className="flex-1 bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500 text-white font-black text-sm py-4 rounded-xl flex items-center justify-center gap-3 uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-red-600/20 cursor-pointer"
-            >
-              <Zap size={20} fill="white" className="animate-pulse" />
-              Unlock Hot Lead (KES 150)
-            </button>
-          ) : hasWhatsApp ? (
+          {hasWhatsApp ? (
             <button
               onClick={handleContact}
               disabled={isGenerating}

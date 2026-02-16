@@ -2,7 +2,6 @@ import json
 import os
 import requests
 import time
-import random
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from urllib.parse import quote
@@ -174,9 +173,8 @@ class SpecialOpsAgent:
         
         all_results = []
         
-        # Combine and shuffle to vary search patterns
+        # Combine and vary search patterns
         target_queries = expanded_queries + social_queries
-        random.shuffle(target_queries)
         
         # Limit to 5 queries for better coverage
         for q in target_queries[:5]:

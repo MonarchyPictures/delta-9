@@ -106,12 +106,12 @@ def ingest_signal(db: Session, signal: Dict[str, Any], product_query: str = "Unk
         
         db.commit()
         logger.info(f"SIGNAL ACCEPTED: {priority} lead saved from {source} (Score: {final_score})")
-        return True
+        return db_lead
         
     except Exception as e:
         db.rollback()
         logger.error(f"INGESTION ERROR: {str(e)}")
-        return False
+        return None
 
 def ingest_lead(db: Session, lead_data: Dict[str, Any]):
     """Legacy wrapper for backward compatibility"""

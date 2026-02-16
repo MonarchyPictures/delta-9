@@ -202,8 +202,9 @@ def get_leads(
         
         for label in window_sequence[start_idx:]:
             final_window = label
+            # Intelligent Ranking: Sort by ranked_score first (which includes freshness), then timestamp
             temp_leads = db_query.filter(models.Lead.created_at >= windows[label])\
-                                 .order_by(models.Lead.created_at.desc())\
+                                 .order_by(models.Lead.ranked_score.desc(), models.Lead.created_at.desc())\
                                  .limit(limit).all()
             if temp_leads:
                 leads = temp_leads

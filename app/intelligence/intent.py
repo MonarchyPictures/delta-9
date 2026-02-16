@@ -33,6 +33,20 @@ BUYER_PATTERNS = [
     "supplier of",
     "any supplier",
 
+    # Service / Job Buyer Signals (New Upgrade)
+    "hiring",
+    "vacancy",
+    "job opening",
+    "remote job",
+    "looking for staff",
+    "looking for employee",
+    "looking for worker",
+    "help wanted",
+    "work available",
+    "job opportunity",
+    "recruiting",
+    "seeking to hire",
+
     # B2B / Industrial signals (New Upgrade)
     "rfq",
     "quotation",
@@ -159,7 +173,8 @@ def buyer_intent_score(text: str, query: str = None) -> float:
     import re
     # Base pattern for quantities - match numbers followed by units
     # We require a unit to avoid matching random numbers like "iPhone 15"
-    qty_pattern = r'(\d+)\s+(l|kg|units|pcs|ton|20\d{2}|ksh|sh|k\b|m|cm|mm|ft|inches|meters|metres|bags|bundles|rolls|drums)'
+    # UPDATED: Handles commas in numbers (e.g., 15,000) and currency prefixes (KSh 15000)
+    qty_pattern = r'((?:ksh|tsh|sh|usd|\$)\s*[\d,]+|[\d,]+\s+(?:l|kg|units|pcs|ton|20\d{2}|ksh|sh|k\b|m|cm|mm|ft|inches|meters|metres|bags|bundles|rolls|drums))'
     if re.search(qty_pattern, text, re.IGNORECASE):
         # Check if it matched a year-like number (e.g., 2024)
         match = re.search(qty_pattern, text, re.IGNORECASE)

@@ -21,7 +21,6 @@ from .scrapers.reddit import RedditScraper
 from .scrapers.google_cse import GoogleCSEScraper
 from .scrapers.whatsapp_public_groups import WhatsAppPublicGroupScraper
 from .scrapers.instagram import InstagramScraper
-from .scrapers.bootstrap_scraper import BootstrapScraper
 from .config import PROD_STRICT
 from .intelligence.confidence import apply_confidence
 from .cache.scraper_cache import get_cached, set_cached
@@ -41,6 +40,57 @@ from .nlp.dedupe import dedupe_leads
 # Limit to 5 concurrent scrapers to keep the server stable.
 SCRAPER_EXECUTOR = ThreadPoolExecutor(max_workers=5)
 
+def ingest_leads(raw_results: List[Dict[str, Any]]) -> List[Any]:
+    """
+    Takes raw scraper results, processes them (NLP dedupe, strict filtering, metadata),
+    and returns a list of verified Lead objects.
+    """
+    if not raw_results:
+        return []
+
+    logger.info(f"INGEST: Processing {len(raw_results)} raw signals...")
+
+    # 1. NLP Deduplication
+    # Group similar leads to avoid duplicates
+    unique_results = dedupe_leads(raw_results)
+    logger.info(f"INGEST: Deduplicated to {len(unique_results)} unique signals")
+
+    # 2. Strict Filtering & Metadata (using Pipeline logic if possible, or reimplementing)
+    # We need to convert these dicts to Lead objects.
+    # We can use LeadPipeline for this conversion and validation.
+    
+    # Since we need a DB session for LeadPipeline, we might need to handle it here 
+    # or assume the caller handles saving.
+    # The user signature is `ingest_leads(raw_results) -> verified_leads`
+    # It doesn't take a session.
+    # But to create Lead objects and check existence, we might need DB.
+    # However, the user says "Returns a list of Lead objects ready to save".
+    # This implies they are not saved yet.
+    
+    from app.db.database import SessionLocal
+    from app.services.pipeline import LeadPipeline
+    
+    verified_leads = []
+    db = SessionLocal()
+    try:
+        pipeline = LeadPipeline(db)
+        for res in unique_results:
+            # Pipeline's process_raw_lead handles:
+            # - Intent Validation
+            # - Scoring & Readiness
+            # - Extraction (Phone, Name)
+            # - Normalization
+            # - Existence Check (against DB)
+            lead = pipeline.process_raw_lead(res)
+            if lead:
+                verified_leads.append(lead)
+    finally:
+        db.close()
+
+    logger.info(f"INGEST: Produced {len(verified_leads)} verified leads ready for storage")
+    return verified_leads
+
+
 # ALL possible scrapers available in the system
 ALL_SCRAPERS = [ 
     GoogleMapsScraper(), 
@@ -51,12 +101,28 @@ ALL_SCRAPERS = [
     GoogleCSEScraper(),
     GoogleScraper(),
     WhatsAppPublicGroupScraper(),
-    InstagramScraper(),
-    BootstrapScraper()
+    InstagramScraper()
 ]
 
 # ABSOLUTE RULE: PROD STRICT ENFORCEMENT
 logger = get_logger("Ingestion")
+
+# ⚡ TIER 1: FAST (API / Lightweight) - 5 sec max return
+TIER_1_SCRAPERS = [
+    "GoogleCSEScraper", 
+    "TwitterScraper", 
+    "DuckDuckGoScraper", 
+    "RedditScraper" # Usually fast via DDG site search
+]
+
+# 🐢 TIER 2: HEAVY (Playwright) - Full deep scrape
+TIER_2_SCRAPERS = [
+    "InstagramScraper",
+    "GoogleMapsScraper",
+    "FacebookMarketplaceScraper",
+    "ClassifiedsScraper",
+    "WhatsAppPublicGroupScraper"
+]
 
 class LiveLeadIngestor:
     def __init__(self, db_session: Session):
@@ -66,8 +132,9 @@ class LiveLeadIngestor:
         if not PROD_STRICT:
             logger.warning("--- WARNING: Delta9 running in DEVELOPMENT mode. Auto-downgrading to bootstrap. ---")
 
-    def check_network_health(self) -> bool:
+    async def check_network_health(self) -> bool:
         """Verify network connectivity and proxy health before ingestion."""
+        import asyncio
         logger.info("NETWORK CHECK: Verifying outbound connectivity...")
         try:
             # Check multiple reliable endpoints with significantly longer timeout for high-latency environments
@@ -77,10 +144,13 @@ class LiveLeadIngestor:
                 "https://duckduckgo.com",
                 "https://www.facebook.com"
             ]
+            
+            # Run checks in thread pool to avoid blocking async loop
             for url in endpoints:
                 try:
                     # Increase timeout to 20s to handle Kenyan mobile network latency
-                    response = requests.get(url, timeout=20)
+                    # Wrap blocking requests.get in asyncio.to_thread
+                    response = await asyncio.to_thread(requests.get, url, timeout=20)
                     if response.status_code == 200 or response.status_code == 301 or response.status_code == 302:
                         logger.info(f"NETWORK CHECK: Connectivity verified via {url} (HTTP {response.status_code})")
                         return True
@@ -219,19 +289,22 @@ class LiveLeadIngestor:
         # Fallback for specific date formats if possible, or return False
         return False, 0
 
-    def fetch_from_external_sources(self, query: str, location: str, time_window_hours: int = 2, category: Optional[str] = "general", last_result_count: int = 0, early_return: bool = True) -> List[Dict[str, Any]]:
+    def fetch_from_external_sources(self, query: str, location: str, time_window_hours: int = 2, category: Optional[str] = "general", last_result_count: int = 0, early_return: bool = True, tier: int = 2) -> List[Dict[str, Any]]:
         """
         Fetch live leads using MULTI-PASS DISCOVERY (3 PASSES).
-        Includes AUTO TIME WINDOW ESCALATION (2h → 6h → 24h).
+        Includes AUTO TIME WINDOW ESCALATION (2h -> 6h -> 24h).
+        
+        tier=1: Fast (API-based) - 5 sec max return
+        tier=2: Full (API + Playwright)
         """
-        # ⏱️ ESCALATION STRATEGY: 2h → 6h → 24h
+        # ⏱️ ESCALATION STRATEGY: 2h -> 6h -> 24h
         # If strict mode returns 0 leads, we automatically expand the search window.
         windows = [2, 6, 24]
         
         all_found_leads = []
         for current_window in windows:
-            logger.info(f"FETCH: Trying window {current_window}h for '{query}' in {location}")
-            leads = self._execute_discovery(query, location, current_window, category, last_result_count, early_return=early_return)
+            logger.info(f"FETCH: Trying window {current_window}h for '{query}' in {location} (Tier {tier})")
+            leads = self._execute_discovery(query, location, current_window, category, last_result_count, early_return=early_return, tier=tier)
             
             if leads:
                 # Tag leads with the window they were found in
@@ -256,7 +329,7 @@ class LiveLeadIngestor:
         deduper = get_deduplicator()
         return deduper.deduplicate(all_found_leads)
 
-    def _execute_discovery(self, query: str, location: str, time_window_hours: int, category: Optional[str] = "general", last_result_count: int = 0, early_return: bool = True) -> List[Dict[str, Any]]:
+    def _execute_discovery(self, query: str, location: str, time_window_hours: int, category: Optional[str] = "general", last_result_count: int = 0, early_return: bool = True, tier: int = 2) -> List[Dict[str, Any]]:
         """Internal discovery execution with PARALLEL scraping and early return."""
         # ABSOLUTE RULE: Mandatory health check
         if not self.check_network_health():
@@ -284,6 +357,11 @@ class LiveLeadIngestor:
             s for s in ALL_SCRAPERS 
             if s.__class__.__name__ in enabled_sources and not s.auto_disabled
         ]
+        
+        # ⚡ TIER FILTERING
+        if tier == 1:
+            logger.info("TIER 1 MODE: Filtering for fast API scrapers only.")
+            enabled_scrapers = [s for s in enabled_scrapers if s.__class__.__name__ in TIER_1_SCRAPERS]
         
         active_scrapers = sorted( 
             enabled_scrapers, 
@@ -329,7 +407,7 @@ class LiveLeadIngestor:
                 logger.info(f"DISPATCH: Running {scraper_name} (Ranked) for Pass {pass_idx+1}...")
                 
                 # Run this scraper for the current pass queries
-                scraper_leads = self._run_parallel_scrapers([scraper], pass_queries, time_window_hours, query, location, early_return=early_return)
+                scraper_leads = self._run_parallel_scrapers([scraper], pass_queries, time_window_hours, query, location, early_return=early_return, tier=tier)
                 
                 # 🇰🇪 GEO BOOST: Prioritize Kenyan hubs before quality checks
                 scraper_leads = apply_geo_bias(scraper_leads)
@@ -350,7 +428,7 @@ class LiveLeadIngestor:
             # Break the pass loop as well if we hit the limit
             if collected_high_confidence >= 5:
                 break
-        
+    
         # 🎯 SMART DEDUPLICATION (NLP Semantic + Phone + URL)
         # Phase 1: NLP Semantic Deduplication (New Layer)
         all_leads = dedupe_leads(all_leads)
@@ -368,8 +446,8 @@ class LiveLeadIngestor:
         logger.info(f"STORAGE: Returning {len(sorted_leads)} leads for processing (Save Everything mode).")
         return sorted_leads
 
-    def _run_parallel_scrapers(self, scrapers: List[BaseScraper], queries: List[str], time_window_hours: int, original_query: str, location: str, early_return: bool = False) -> List[Dict[str, Any]]:
-        """Helper to run a set of scrapers in parallel with hard 10s timeout and early return."""
+    def _run_parallel_scrapers(self, scrapers: List[BaseScraper], queries: List[str], time_window_hours: int, original_query: str, location: str, early_return: bool = False, tier: int = 2) -> List[Dict[str, Any]]:
+        """Helper to run a set of scrapers in parallel with hard timeout and early return."""
         import time
         import uuid
         import random
@@ -378,7 +456,12 @@ class LiveLeadIngestor:
         
         results_leads = []
         verified_count = 0
-        HARD_TIMEOUT = 10 # ⏱️ Production Guard: 10s max per scraper
+        
+        # ⏱️ TIMEOUT CONTROL:
+        # Tier 1 (Manual Search): Strict 5s timeout per scraper to ensure speed.
+        # Tier 2 (Agent/Background): Relaxed 25s timeout for heavy scraping (Playwright).
+        HARD_TIMEOUT = 5 if tier == 1 else 25
+        
         EARLY_RETURN_THRESHOLD = 2 # 🚀 Speed Guard: Return if >= 2 high-confidence signals found
         
         # 🚀 Use GLOBAL EXECUTOR to prevent resource exhaustion

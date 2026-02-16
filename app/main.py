@@ -1,9 +1,11 @@
 import os
+import asyncio
 import logging
 import time
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, Request, Depends, HTTPException, Header, BackgroundTasks
+from app.services.agent_scheduler import scheduler_loop
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 import io
@@ -27,6 +29,7 @@ from .config.scrapers import SCRAPER_CONFIG
 from .scrapers.metrics import record_verified
 from .scrapers.supervisor import revive_scrapers
 from .routes.admin import verify_api_key
+from .utils.logging import setup_logging
 
 # Import new routers
 from .routes.leads import router as leads_router
@@ -35,11 +38,13 @@ from .routes.scrapers import router as scrapers_router
 from .routes.admin import router as admin_router
 from .routes.pipeline import router as pipeline_router
 from .routes.outreach import router as outreach_router
+from .api.routes import agents as agents_router
+from .api.routes import notifications as notifications_router
 
 from .intelligence.buyer_profile import BuyerProfile, BuyerBehaviorEngine
 
-# Setup Logging
-logging.basicConfig(level=logging.INFO)
+# Setup Logging (Structured JSON for Production)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 # ABSOLUTE RULE: Delta9 is now fully generic.
@@ -56,9 +61,18 @@ except Exception as e:
 app = FastAPI(title="Delta9 Production API", version="1.0.0")
 
 # Add CORS Middleware
+# In strict production mode, we default to NO origins if not specified.
+# In dev/bootstrap, we allow localhost.
+default_origins = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173"
+if PROD_STRICT:
+    default_origins = ""
+
+origins_str = os.getenv("ALLOWED_ORIGINS", default_origins)
+origins = origins_str.split(",") if origins_str else []
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -71,11 +85,21 @@ app.include_router(scrapers_router)
 app.include_router(admin_router)
 app.include_router(pipeline_router)
 app.include_router(outreach_router)
+app.include_router(agents_router.router, prefix="/agents", tags=["agents"])
+app.include_router(notifications_router.router, prefix="/notifications", tags=["notifications"])
 
 # --- Endpoints ---
 @app.on_event("startup")
 async def startup_event():
-    # 1. Sync scraper states from DB
+    # 0. Reset Agent States (Zombie Protection)
+    from app.services.agent_scheduler import scheduler_loop, reset_agents_on_startup
+    reset_agents_on_startup()
+
+    # 1. Start Async Agent Supervisor
+    asyncio.create_task(scheduler_loop())
+    logger.info("--- Async Agent Supervisor started ---")
+
+    # 2. Sync scraper states from DB
     logger.info("--- Syncing scraper states from database ---")
     try:
         from .scrapers.metrics import sync_metrics_from_db
@@ -84,11 +108,23 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Scraper sync failed: {str(e)}")
 
-    # 2. Start Background Scheduler
+    # 3. Start Background Scheduler (Maintenance Only)
     scheduler = BackgroundScheduler()
     scheduler.add_job(revive_scrapers, 'interval', hours=1)
+    
+    # NOTE: Removed redundant run_all_agents job. 
+    # The async scheduler_loop handles agent execution now.
+        
     scheduler.start()
-    logger.info("--- Background scheduler started (Revive Scrapers every 1h) ---")
+    app.state.scheduler = scheduler
+    logger.info("--- Background maintenance scheduler started ---")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("--- Delta9 Intelligence Node shutting down ---")
+    if hasattr(app.state, "scheduler"):
+        logger.info("--- Stopping Background Scheduler ---")
+        app.state.scheduler.shutdown()
 
 @app.get("/health")
 def health_check(db: Session = Depends(get_db)):
