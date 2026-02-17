@@ -1,5 +1,5 @@
 from urllib.robotparser import RobotFileParser
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import time
 
 class ComplianceManager:
@@ -22,12 +22,12 @@ class ComplianceManager:
     def wait_for_rate_limit(self, platform):
         """Implement platform-specific throttling."""
         if platform in self.last_request_time:
-            elapsed = (datetime.now() - self.last_request_time[platform]).total_seconds()
+            elapsed = (datetime.now(timezone.utc) - self.last_request_time[platform]).total_seconds()
             wait_time = self.rate_limits.get(platform, 10) - elapsed
             if wait_time > 0:
                 time.sleep(wait_time)
         
-        self.last_request_time[platform] = datetime.now()
+        self.last_request_time[platform] = datetime.now(timezone.utc)
 
     def anonymize_data(self, lead_data):
         """Ensure GDPR compliance by anonymizing personal data if needed."""

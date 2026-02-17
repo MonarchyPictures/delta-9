@@ -2,7 +2,7 @@ from app.db import models
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 import urllib.parse
 
 def whatsapp_link(phone: str, message: str):
@@ -62,7 +62,7 @@ class OutreachEngine:
             lead = db.query(models.Lead).filter(models.Lead.id == lead_id).first()
             if lead:
                 lead.status = models.CRMStatus.CONTACTED
-                lead.last_contact_attempt = datetime.now()
+                lead.last_contact_attempt = datetime.now(timezone.utc)
                 db.commit()
                 return True
             return False
@@ -76,7 +76,7 @@ class OutreachEngine:
         try:
             lead = db.query(models.Lead).filter(models.Lead.id == lead_id).first()
             if lead:
-                now = datetime.now()
+                now = datetime.now(timezone.utc)
                 
                 # Update response metrics
                 lead.response_count += 1

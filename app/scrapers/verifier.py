@@ -2,7 +2,8 @@ import logging
 import re
 from typing import Dict, Any, List, Optional
 from .metrics import record_verified, CATEGORY_STATS, record_category_lead
-from ..core.pipeline_mode import BOOTSTRAP_RULES, PIPELINE_MODE
+from ..core.pipeline_mode import BOOTSTRAP_RULES, RELAXED_RULES, PIPELINE_MODE
+from app.config.runtime import INTENT_THRESHOLD, REQUIRE_VERIFICATION, PROD_STRICT
 
 from ..intelligence.intent import BUYER_PATTERNS, buyer_intent_score
 
@@ -56,7 +57,7 @@ def is_verified_signal(text: str, url: str = "") -> bool:
 
     # 🎯 Generic Intent Engine Rule: 0.4 Threshold
     score = buyer_intent_score(text)
-    return score >= 0.4
+    return score >= INTENT_THRESHOLD
 
 def adaptive_threshold(category: str, base: float = 0.85, loosen_factor: float = 0.0) -> float:
     """
@@ -65,9 +66,15 @@ def adaptive_threshold(category: str, base: float = 0.85, loosen_factor: float =
     Low success rate -> Higher threshold (stricter verification)
     loosen_factor: amount to decrease threshold (e.g. 0.1 for 10% lower)
     """
+    # 🧪 CONFIG OVERRIDE: Use global threshold if not in strict mode
+    if not PROD_STRICT:
+        base = INTENT_THRESHOLD
+    
     # 🧪 BOOTSTRAP OVERRIDE: Use lower floor locally
     if PIPELINE_MODE == "bootstrap":
         base = min(base, BOOTSTRAP_RULES["min_confidence"])
+    elif PIPELINE_MODE == "relaxed":
+        base = min(base, RELAXED_RULES["min_confidence"])
 
     threshold = base
     
@@ -137,8 +144,12 @@ def verify_leads(leads: List[Dict[str, Any]], loosen: bool = False) -> List[Dict
                 is_verified = True
                 reason = "trusted_source" 
             elif meets_threshold:
-                is_verified = True
-                reason = f"adaptive_threshold_match({threshold:.2f})"
+                if REQUIRE_VERIFICATION:
+                    is_verified = False
+                    reason = "verification_required_by_policy"
+                else:
+                    is_verified = True
+                    reason = f"adaptive_threshold_match({threshold:.2f})"
             elif has_cross_match: 
                 is_verified = True
                 reason = "cross_source_match" 

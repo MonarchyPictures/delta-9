@@ -1,7 +1,7 @@
 
 import requests
 try:
-    r = requests.get('http://127.0.0.1:8000/leads/search?live=true&limit=15&verified_only=false')
+    r = requests.get('http://localhost:8000/leads/search?live=true&limit=15&verified_only=false')
     print(f'Status: {r.status_code}')
     data = r.json()
     print(f'Count: {len(data.get("results", []))}')

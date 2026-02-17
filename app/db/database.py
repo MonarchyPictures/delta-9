@@ -2,11 +2,12 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 import os
 
-# Use PostgreSQL exclusively for production
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+# Use PostgreSQL exclusively for production, fallback to SQLite for local
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./intent_radar.db").strip()
 
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is required for production.")
+    # Should not happen with default, but good safety
+    raise ValueError("DATABASE_URL environment variable is required.")
 
 # Render/Heroku fix: SQLAlchemy requires 'postgresql://' instead of 'postgres://'
 if DATABASE_URL.startswith("postgres://"):

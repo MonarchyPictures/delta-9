@@ -28,6 +28,7 @@ const Dashboard = () => {
   // Drawer state
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState(null);
+  const [debugData, setDebugData] = useState(null);
   
   const searchControllerRef = useRef(null);
 
@@ -51,7 +52,6 @@ const Dashboard = () => {
   }, []);
 
   const fetchLeads = async (searchQuery, isPolling = false) => {
-    const searchLocation = locationStr || 'Kenya';
     // Get or create session ID
     let sessionId = localStorage.getItem('d9_session_id');
     if (!sessionId) {
@@ -105,21 +105,30 @@ const Dashboard = () => {
           },
           body: JSON.stringify({ 
             query: searchQuery, 
-            location: searchLocation,
-            session_id: sessionId
+            location: "remote" 
           }),
           cache: 'no-store' // ENFORCED: No cached data
         });
         
         clearTimeout(timeoutId);
-        
-        if (!searchRes.ok) {
-          const errorData = await searchRes.json().catch(() => ({ detail: 'Unknown error' }));
-          throw new Error(errorData.detail || `Server returned ${searchRes.status}`);
-        }
 
         const searchData = await searchRes.json();
+        
+        if (!searchRes.ok) {
+          throw new Error(JSON.stringify(searchData));
+        }
+
+        console.log("Success:", searchData);
         if (searchData.warning) setWarningMessage(searchData.warning);
+        
+        // Capture debug data
+        if (searchData.metrics || searchData.rejected) {
+            setDebugData({
+                metrics: searchData.metrics || {},
+                rejected: searchData.rejected || []
+            });
+        }
+
         if (searchData.results && searchData.results.length > 0) {
           // User Requested: Frontend Sorting by buyer_match_score
           const sortedResults = [...searchData.results].sort((a, b) => (b.buyer_match_score || 0) - (a.buyer_match_score || 0));
@@ -151,7 +160,11 @@ const Dashboard = () => {
         cache: 'no-store' // ENFORCED: No cached data
       });
 
-      if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("Backend error:", text);
+        throw new Error(text);
+      }
       const data = await res.json();
       if (data.warning) setWarningMessage(data.warning);
       // Handle both { leads: [] } and [] formats
@@ -166,11 +179,14 @@ const Dashboard = () => {
       const sortedLeads = [...finalLeads].sort((a, b) => (b.buyer_match_score || 0) - (a.buyer_match_score || 0));
       setLeads(sortedLeads);
     } catch (err) {
+      console.error("REAL ERROR:", err);
       if (err.name === 'AbortError') return;
-      if (!isPolling) {
-        console.error("Discovery error:", err);
-        setErrorMessage(err.message || "Failed to fetch leads. Check network connection.");
+      console.error("Search failed:", err);
+      let msg = err?.message || String(err) || "Backend connection failed. Check if server is running.";
+      if (msg === "Failed to fetch") {
+         msg += " (Connection Refused or CORS error - Check Backend Logs)";
       }
+      setErrorMessage(msg);
     } finally {
       if (!isPolling) setLoading(false);
       if (searchControllerRef.current === controller) {
@@ -203,13 +219,26 @@ const Dashboard = () => {
 
   // Google CSE script effect
   useEffect(() => {
-    const script = document.createElement('script');
-    script.src = `https://cse.google.com/cse.js?cx=${GOOGLE_CSE_ID}`;
-    script.async = true;
-    document.body.appendChild(script);
-    return () => {
-      document.body.removeChild(script);
+    if (!GOOGLE_CSE_ID) return;
+
+    const loadCSE = () => {
+      const existingScript = document.querySelector(`script[src*="cse.google.com/cse.js"]`);
+      if (!existingScript) {
+        const script = document.createElement('script');
+        script.src = `https://cse.google.com/cse.js?cx=${GOOGLE_CSE_ID}`;
+        script.async = true;
+        document.body.appendChild(script);
+      } else {
+        // If script is already loaded, try to re-render the element
+        if (window.google && window.google.search && window.google.search.cse && window.google.search.cse.element) {
+           window.google.search.cse.element.go();
+        }
+      }
     };
+
+    // Small delay to ensure DOM is ready
+    const timer = setTimeout(loadCSE, 100);
+    return () => clearTimeout(timer);
   }, []);
 
   const trendingSearches = [
@@ -407,15 +436,12 @@ const Dashboard = () => {
               <div className="grid grid-cols-1 gap-4">
                 {errorMessage ? (
                   <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-8 text-center">
-                    <p className="text-red-500 font-black uppercase tracking-widest text-sm mb-2">
-                      Pipeline Status: {warningMessage ? "BOOTSTRAP / DEV" : "PROD_STRICT"}
-                    </p>
                     <p className="text-white font-bold text-lg">{errorMessage}</p>
-                    <p className="text-white/40 text-[10px] mt-4 uppercase tracking-tighter">
-                      {warningMessage 
-                        ? "Local development mode enabled. Bypassing strict verification for testing." 
-                        : "Only independently verified outbound signals are permitted in production mode."}
-                    </p>
+                    {warningMessage && (
+                      <p className="text-white/40 text-[10px] mt-4 uppercase tracking-tighter">
+                        Local development mode enabled. Bypassing strict verification for testing.
+                      </p>
+                    )}
                     {errorMessage.includes("Failed to fetch") && (
                       <p className="text-blue-400 text-[10px] mt-2 font-bold uppercase">
                         Tip: Ensure backend is running at {API_URL} and check CORS settings.
@@ -439,6 +465,47 @@ const Dashboard = () => {
         onClose={() => setIsDrawerOpen(false)} 
         filterType={activeFilter} 
       />
+
+      {/* Debug Panel */}
+      {hasSearched && debugData && (
+        <div className="mx-auto max-w-4xl px-4 pb-12">
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+                <h3 className="text-white font-bold mb-4 uppercase tracking-widest text-xs">Pipeline Debug Metrics</h3>
+                
+                <div className="grid grid-cols-3 gap-4 mb-6">
+                    <div className="bg-black/50 p-4 rounded-xl border border-white/5">
+                        <div className="text-white/40 text-[10px] uppercase">Scraped</div>
+                        <div className="text-2xl font-black text-blue-500">{debugData.metrics?.scraped || 0}</div>
+                    </div>
+                    <div className="bg-black/50 p-4 rounded-xl border border-white/5">
+                        <div className="text-white/40 text-[10px] uppercase">Passed</div>
+                        <div className="text-2xl font-black text-green-500">{leads.length}</div>
+                    </div>
+                    <div className="bg-black/50 p-4 rounded-xl border border-white/5">
+                        <div className="text-white/40 text-[10px] uppercase">Rejected</div>
+                        <div className="text-2xl font-black text-red-500">{debugData.metrics?.rejected || debugData.rejected?.length || 0}</div>
+                    </div>
+                </div>
+
+                {debugData.rejected?.length > 0 && (
+                    <div className="space-y-2">
+                        <h4 className="text-white/60 font-bold text-[10px] uppercase tracking-widest mb-2">Rejected Signals</h4>
+                        <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
+                            {debugData.rejected.map((item, idx) => (
+                                <div key={idx} className="bg-red-500/5 border border-red-500/10 p-3 rounded-lg">
+                                    <div className="flex justify-between items-start mb-1">
+                                        <span className="text-red-400 font-bold text-xs">{item.reason || 'Unknown Reason'}</span>
+                                        <span className="text-white/20 text-[10px]">{item.source || 'Unknown Source'}</span>
+                                    </div>
+                                    <p className="text-white/40 text-xs line-clamp-2">{item.text || JSON.stringify(item)}</p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.db.models import Lead
 import statistics
 
@@ -10,7 +10,7 @@ class DemandForecaster:
 
     def get_market_trends(self, days: int = 7):
         """Analyze lead volume trends per category over the last X days."""
-        cutoff_date = datetime.now() - timedelta(days=days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
         
         # Get lead counts per category per day
         results = self.db.query(
@@ -33,7 +33,7 @@ class DemandForecaster:
     def predict_demand_spikes(self, category: str):
         """Identify if a category is experiencing a demand spike."""
         # Get daily counts for the last 30 days
-        cutoff_date = datetime.now() - timedelta(days=30)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=30)
         daily_counts = self.db.query(
             func.date(Lead.timestamp).label('day'),
             func.count(Lead.id).label('count')
@@ -64,7 +64,7 @@ class DemandForecaster:
     def get_emerging_markets(self):
         """Find locations (cities/regions) with rapidly increasing demand."""
         # Simple implementation: find locations with most new leads in last 24h vs last 7 days
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         last_24h = now - timedelta(days=1)
         last_7d = now - timedelta(days=7)
         

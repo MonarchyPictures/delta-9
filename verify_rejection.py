@@ -21,10 +21,12 @@ def test_rejection():
     result = scorer.validate_lead_debug(rejected_text)
     print(f"Validation Result: {result}")
     
-    if not result['valid']:
-        print("✅ Correctly rejected (Seller/Low Score)")
+    if result['valid']:
+        print("✅ Correctly accepted (Soft Flagged)")
+        if "Soft Flagged for SELLER intent" in str(result.get('reasons')):
+             print("   - Verified: Flagged as SELLER")
     else:
-        print("❌ Unexpectedly accepted!")
+        print("❌ Unexpectedly rejected (Hard Block should be removed!)")
 
     # Test a valid text for comparison
     valid_text = "Looking for a Lenovo ThinkPad T470s in Nairobi, budget 30k"

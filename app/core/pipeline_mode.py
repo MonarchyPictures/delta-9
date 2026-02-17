@@ -5,10 +5,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 🌍 Pipeline Configuration
-# KEEP ONLY: bootstrap (local + dev), strict (future prod)
-PIPELINE_MODE = os.getenv("PIPELINE_MODE", "bootstrap").lower()
-if PIPELINE_MODE not in ["bootstrap", "strict"]:
-    PIPELINE_MODE = "bootstrap"
+# KEEP ONLY: bootstrap (local + dev), relaxed (recommended prod), strict (future prod)
+PIPELINE_MODE = os.getenv("PIPELINE_MODE", "relaxed").lower()
+if PIPELINE_MODE not in ["bootstrap", "relaxed", "strict"]:
+    PIPELINE_MODE = "relaxed"
 
 # Single rule: Flexible query-based discovery
 PIPELINE_QUERY = os.getenv("PIPELINE_QUERY", "").lower()
@@ -22,7 +22,18 @@ BOOTSTRAP_RULES = {
     "label": "Early signal (local)"
 }
 
+# 🛡️ Relaxed Production rules (Recommended)
+RELAXED_RULES = {
+    "min_sources": 1,
+    "min_confidence": 0.6,
+    "allow_unverified": False,
+    "label": "Standard Production"
+}
+
 def is_prod() -> bool:
+    return PIPELINE_MODE in ["strict", "relaxed"]
+
+def is_strict() -> bool:
     return PIPELINE_MODE == "strict"
 
 def is_bootstrap() -> bool:

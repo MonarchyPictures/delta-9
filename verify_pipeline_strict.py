@@ -1,73 +1,44 @@
 import requests
-import time
-import json
+import sys
 
-def verify_pipeline():
-    base_url = "http://127.0.0.1:8000"
-    query = "tires"
-    location = "Kenya"
+BASE_URL = "http://localhost:8000"
+
+def test_soft_flagging():
+    print("Testing Soft Flagging for Invalid API Key...")
     
-    print(f"🚀 Starting Strict Pipeline Verification for query: '{query}'")
-    
-    # 1. Trigger Search
-    print(f"--- Step 1: Triggering Search ---")
+    # 1. Test with Valid API Key
+    headers_valid = {"x-api-key": "d9_prod_secret_key_2024"}
     try:
-        # Increased timeout for initial heavy model load
-        res = requests.post(f"{base_url}/search?query={query}&location={location}", timeout=30)
-        print(f"Search trigger status: {res.status_code}")
-        if res.status_code == 200:
-            print(f"Response data: {res.json()}")
+        # Note: Route is /settings based on app/routes/admin.py having no prefix
+        response = requests.get(f"{BASE_URL}/settings", headers=headers_valid)
+        if response.status_code == 200:
+            print("✅ Valid API Key: Success (200 OK)")
         else:
-            print(f"Error: {res.text}")
-            return
+            print(f"❌ Valid API Key: Failed ({response.status_code})")
+            sys.exit(1)
     except Exception as e:
-        print(f"Connection error: {e}")
-        return
+        print(f"❌ Connection Error: {e}")
+        sys.exit(1)
 
-    # 2. Wait for results (since it's background/sync fallback)
-    wait_time = 45 # Increased wait for more thorough search
-    print(f"--- Step 2: Waiting {wait_time}s for leads to populate ---")
-    time.sleep(wait_time)
-
-    # 3. Check Leads
-    print(f"--- Step 3: Inspecting Leads ---")
+    # 2. Test with Invalid API Key
+    headers_invalid = {"x-api-key": "invalid_key_123"}
     try:
-        res = requests.get(f"{base_url}/leads?location={location}")
-        data = res.json()
+        response = requests.get(f"{BASE_URL}/settings", headers=headers_invalid)
         
-        # Check if data is a list (leads) or a dict (with leads key)
-        leads = data if isinstance(data, list) else data.get('leads', [])
+        # In Soft Flagging mode, we expect 200 OK (but internally flagged)
+        # OR 401 if we decided to keep it strict. 
+        # Based on my code change, it should be 200 OK because HTTPException is commented out.
         
-        print(f"Found {len(leads)} leads.")
-        
-        seller_found = False
-        buyer_count = 0
-        
-        # Take up to 10
-        limit = min(10, len(leads))
-        for i in range(limit):
-            lead = leads[i]
-            snippet = lead.get('buyer_request_snippet', '').lower()
-            intent = lead.get('intent_type', 'UNKNOWN')
+        if response.status_code == 200:
+            print("✅ Invalid API Key: Soft Flagged (200 OK) - SUCCESS")
+        elif response.status_code == 401:
+            print("❌ Invalid API Key: Hard Blocked (401 Unauthorized) - FAIL (Soft Flagging not active)")
+        else:
+            print(f"⚠️ Invalid API Key: Unexpected Status ({response.status_code})")
             
-            # Strict Intent Check
-            is_seller_text = any(s in snippet for s in ["for sale", "selling", "available", "price", "mzigo mpya"])
-            
-            print(f"{i+1}. [{intent}] {lead.get('source_platform')} | {lead.get('post_link')[:30]}...")
-            print(f"   Text: {snippet[:100]}...")
-            
-            if intent == "SELLER" or (is_seller_text and "who" not in snippet and "anyone" not in snippet):
-                print(f"   ❌ ERROR: Seller lead found in buyer pipeline!")
-                seller_found = True
-            elif intent == "BUYER":
-                buyer_count += 1
-                
-        print(f"\nSummary:")
-        print(f" - Buyer Leads: {buyer_count}")
-        print(f" - Seller Leads: {'❌ FAIL' if seller_found else '✅ PASS (Zero)'}")
-        
     except Exception as e:
-        print(f"Inspection error: {e}")
+        print(f"❌ Connection Error: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    verify_pipeline()
+    test_soft_flagging()

@@ -191,4 +191,12 @@ def buyer_intent_score(text: str, query: str = None) -> float:
         if any(rp in text for rp in rfq_patterns):
             score += 0.1
 
+    # High Recall Mode: Allow lower confidence signals but mark them
+    from app.config.runtime import INTENT_THRESHOLD, HIGH_RECALL_MODE
+    if score < INTENT_THRESHOLD:
+        if HIGH_RECALL_MODE:
+             # Downgrade score but allow it to pass filter
+             return score * 0.5
+        return 0.0
+
     return min(score, 1.0)

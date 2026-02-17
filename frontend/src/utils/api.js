@@ -1,5 +1,5 @@
 // Config via Vite env vars
-export const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+export const API_URL = "http://localhost:8000";
 export const API_KEY = import.meta.env.VITE_API_KEY || "d9_prod_secret_key_2024";
 export const GOOGLE_CSE_ID = "f32db13486dc14c26";
 
@@ -50,182 +50,169 @@ export const fetchLeads = async (limit = 10) => {
 };
 
 export const fetchLeadsMeta = async (limit = 10) => {
-  try {
-    const response = await fetchWithRetry(`${API_URL}/leads?limit=${limit}`, {
-      method: "GET",
-      headers,
-    });
-    const data = await response.json();
-    return {
-      leads: data.leads || [],
-      warning: data.warning || "",
-    };
-  } catch (error) {
-    console.error("Error fetching leads:", error);
-    return { leads: [], warning: "" };
-  }
+    try {
+      const response = await fetchWithRetry(`${API_URL}/leads?limit=${limit}`, {
+        method: "GET",
+        headers,
+      });
+      const data = await response.json();
+      return {
+          leads: data.leads || [],
+          warning: data.warning
+      };
+    } catch (error) {
+      console.error("Error fetching leads meta:", error);
+      return { leads: [], warning: "" };
+    }
 };
 
 export const fetchNotifications = async () => {
-  try {
-    const response = await fetchWithRetry(`${API_URL}/notifications/`, {
-      method: "GET",
-      headers,
-    });
-    return await response.json();
-  } catch (error) {
-    console.error("Error fetching notifications:", error);
-    return [];
-  }
+    try {
+        const response = await fetchWithRetry(`${API_URL}/notifications`, {
+            method: "GET",
+            headers
+        });
+        if (!response.ok) throw new Error("Failed to fetch notifications");
+        return await response.json();
+    } catch (error) {
+        console.error("Error fetching notifications:", error);
+        return [];
+    }
 };
 
 export const fetchNotificationCount = async (unreadOnly = false) => {
-  try {
-    const response = await fetchWithRetry(`${API_URL}/notifications/count?unread_only=${unreadOnly}`, {
-      method: "GET",
-      headers,
-    });
-    const data = await response.json();
-    return data.count || 0;
-  } catch (error) {
-    console.error("Error fetching notification count:", error);
-    return 0;
-  }
+    try {
+        const response = await fetchWithRetry(`${API_URL}/notifications/count?unread_only=${unreadOnly}`, {
+            method: "GET",
+            headers
+        });
+        if (!response.ok) throw new Error("Failed to fetch notification count");
+        const data = await response.json();
+        return data.count || 0;
+    } catch (error) {
+        console.error("Error fetching notification count:", error);
+        return 0;
+    }
 };
 
 export const markNotificationAsRead = async (id) => {
-  try {
-    const response = await fetchWithRetry(`${API_URL}/notifications/${id}/read`, {
-      method: "POST",
-      headers,
-    });
-    return await response.json();
-  } catch (error) {
-    console.error("Error marking notification as read:", error);
-    return { status: "error" };
-  }
+    try {
+        await fetch(`${API_URL}/notifications/${id}/read`, {
+            method: "POST",
+            headers
+        });
+    } catch (error) {
+        console.error("Error marking notification as read:", error);
+    }
 };
 
 export const clearAllNotifications = async () => {
-  try {
-    const response = await fetchWithRetry(`${API_URL}/notifications/clear`, {
-      method: "DELETE",
-      headers,
-    });
-    return await response.json();
-  } catch (error) {
-    console.error("Error clearing notifications:", error);
-    return { status: "error" };
-  }
+    try {
+        await fetch(`${API_URL}/notifications`, {
+            method: "DELETE",
+            headers
+        });
+    } catch (error) {
+        console.error("Error clearing notifications:", error);
+    }
 };
 
-export const searchLeads = async (query, location = "Kenya") => {
-  try {
-    const body = JSON.stringify({ query, location });
-    const response = await fetchWithRetry(`${API_URL}/search`, {
-      method: "POST",
-      headers,
-      body,
-    });
-    const data = await response.json();
-    if (data.warning) {
-      console.warn("⚠️ Warning from backend:", data.warning);
-    }
-    if (data.status === "error") {
-      console.error("Search error:", data.message);
-      return [];
-    }
-    return data.results || [];
-  } catch (error) {
-    console.error("Error searching leads:", error);
-    return [];
-  }
-};
+// --- AGENTS API ---
 
 export const fetchAgents = async () => {
-  try {
-    const response = await fetchWithRetry(`${API_URL}/agents`, {
-      method: "GET",
-      headers,
-    });
-    return await response.json();
-  } catch (error) {
-    console.error("Error fetching agents:", error);
-    return [];
-  }
+    try {
+        const response = await fetchWithRetry(`${API_URL}/agents`, {
+            method: "GET",
+            headers
+        });
+        if (!response.ok) throw new Error("Failed to fetch agents");
+        return await response.json();
+    } catch (error) {
+        console.error("Error fetching agents:", error);
+        return [];
+    }
 };
 
 export const createAgent = async (agentData) => {
-  try {
-    const response = await fetchWithRetry(`${API_URL}/agents`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(agentData),
-    });
-    return await response.json();
-  } catch (error) {
-    console.error("Error creating agent:", error);
-    return { status: "error", message: error.message };
-  }
-};
-
-export const deleteAgent = async (id) => {
-  try {
-    const response = await fetchWithRetry(`${API_URL}/agents/${id}`, {
-      method: "DELETE",
-      headers,
-    });
-    return await response.json();
-  } catch (error) {
-    console.error("Error deleting agent:", error);
-    return { status: "error" };
-  }
+    try {
+        const response = await fetch(`${API_URL}/agents`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(agentData)
+        });
+        if (!response.ok) throw new Error("Failed to create agent");
+        return await response.json();
+    } catch (error) {
+        console.error("Error creating agent:", error);
+        return { error: error.message };
+    }
 };
 
 export const stopAgent = async (id) => {
-  try {
-    const response = await fetchWithRetry(`${API_URL}/agents/${id}/stop`, {
-      method: "POST",
-      headers,
-    });
-    return await response.json();
-  } catch (error) {
-    console.error("Error stopping agent:", error);
-    return { status: "error" };
-  }
+    try {
+        const response = await fetch(`${API_URL}/agents/${id}/stop`, {
+            method: "POST",
+            headers
+        });
+        if (!response.ok) throw new Error("Failed to stop agent");
+        return await response.json();
+    } catch (error) {
+        console.error("Error stopping agent:", error);
+        return { error: error.message };
+    }
 };
 
-export const fetchAgentLeads = async (id) => {
-  try {
-    const response = await fetchWithRetry(`${API_URL}/agents/${id}/leads`, {
-      method: "GET",
-      headers,
-    });
-    return await response.json();
-  } catch (error) {
-    console.error("Error fetching agent leads:", error);
-    return [];
-  }
+export const deleteAgent = async (id) => {
+    try {
+        const response = await fetch(`${API_URL}/agents/${id}`, {
+            method: "DELETE",
+            headers
+        });
+        if (!response.ok) throw new Error("Failed to delete agent");
+        return await response.json();
+    } catch (error) {
+        console.error("Error deleting agent:", error);
+        return { error: error.message };
+    }
 };
 
 export const exportAgentLeads = async (id) => {
-  try {
-    const response = await fetchWithRetry(`${API_URL}/agents/${id}/export`, {
-      method: "GET",
-      headers,
-    });
-    
-    // Get the filename from the Content-Disposition header if possible
-    const contentDisposition = response.headers.get('Content-Disposition');
-    let filename = `agent_${id}_leads.txt`;
-    if (contentDisposition && contentDisposition.indexOf('filename=') !== -1) {
-      filename = contentDisposition.split('filename=')[1].replace(/"/g, '');
+    try {
+        const response = await fetch(`${API_URL}/agents/${id}/export`, {
+            method: "GET",
+            headers
+        });
+        
+        if (!response.ok) throw new Error("Failed to export leads");
+        
+        const blob = await response.blob();
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = `agent_${id}_leads.txt`;
+        
+        if (contentDisposition) {
+            const match = contentDisposition.match(/filename="?([^"]+)"?/);
+            if (match && match[1]) {
+                filename = match[1];
+            }
+        }
+        
+        return { blob, filename };
+    } catch (error) {
+        console.error("Error exporting agent leads:", error);
+        return null;
     }
-    
-    const blob = await response.blob();
-    return { blob, filename };
-  } catch (error) {
-    console.error("Error exporting agent leads:", error);
-    return null;
-  }
+};
+
+export const fetchAgentLeads = async (agentId, limit = 50, offset = 0) => {
+    try {
+        const response = await fetchWithRetry(`${API_URL}/agents/${agentId}/leads?limit=${limit}&offset=${offset}`, {
+            method: "GET",
+            headers
+        });
+        if (!response.ok) throw new Error("Failed to fetch agent leads");
+        return await response.json();
+    } catch (error) {
+        console.error("Error fetching agent leads:", error);
+        return [];
+    }
 };

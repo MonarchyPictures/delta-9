@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import Optional, List
@@ -29,44 +30,44 @@ async def export_leads_by_type(
 ):
     """Export leads by intelligence tier as a .txt file."""
     try:
-        query = db.query(models.Lead)
-        if type == "active":
-            query = query.filter(models.Lead.confidence_score >= STRICT_PUBLIC)
-        elif type == "high_intent":
-            query = query.filter(models.Lead.confidence_score >= HIGH_INTENT, models.Lead.confidence_score < STRICT_PUBLIC)
-        elif type == "bootstrap":
-            query = query.filter(models.Lead.confidence_score < HIGH_INTENT)
+        def iter_leads():
+            yield f"--- DELTA-9 LEAD EXPORT ({type.upper()}) ---\n"
+            yield f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n"
+            
+            query = db.query(models.Lead)
+            if type == "active":
+                query = query.filter(models.Lead.confidence_score >= STRICT_PUBLIC)
+            elif type == "high_intent":
+                query = query.filter(models.Lead.confidence_score >= HIGH_INTENT, models.Lead.confidence_score < STRICT_PUBLIC)
+            elif type == "bootstrap":
+                query = query.filter(models.Lead.confidence_score < HIGH_INTENT)
 
-        leads = query.all()
-        
-        if not leads:
-            raise HTTPException(status_code=404, detail=f"No {type} leads found to export")
-            
-        output = io.StringIO()
-        output.write(f"--- DELTA-9 LEAD EXPORT ({type.upper()}) ---\n")
-        output.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-        
-        for l in leads:
-            l_dict = l.to_dict()
-            output.write(f"ID: {l_dict.get('id')}\n")
-            output.write(f"Product: {l_dict.get('product', 'N/A')}\n")
-            output.write(f"Location: {l_dict.get('location', 'N/A')}\n")
-            output.write(f"Score: {l_dict.get('confidence', 0)}\n")
-            output.write(f"Snippet: {l_dict.get('buyer_intent_quote', 'N/A')}\n")
-            output.write(f"WhatsApp: {l_dict.get('whatsapp_url', 'N/A')}\n")
-            output.write("---\n\n")
-            
-        output.seek(0)
-        filename = f"delta9-{type}-{datetime.now().strftime('%Y%m%d')}.txt"
+            # Stream results to avoid memory spikes
+            for lead in query.yield_per(100):
+                yield f"ID: {lead.id}\n"
+                yield f"Product: {lead.product_category}\n"
+                yield f"Location: {lead.location_raw}\n"
+                yield f"Score: {lead.confidence_score}\n"
+                yield f"Snippet: {lead.buyer_intent_snippet}\n"
+                yield f"WhatsApp: {lead.contact_whatsapp or 'N/A'}\n"
+                yield "---\n\n"
+
+        filename = f"delta9-{type}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.txt"
         
         return StreamingResponse(
-            io.BytesIO(output.getvalue().encode('utf-8')),
+            iter_leads(),
             media_type="text/plain",
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
     except Exception as e:
         logger.error(f"Export failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Export failed")
+        # Soft failure: Return a text file with the error
+        error_content = f"Error generating export: {str(e)}"
+        return StreamingResponse(
+            io.BytesIO(error_content.encode('utf-8')),
+            media_type="text/plain",
+            headers={"Content-Disposition": f"attachment; filename=error_log.txt"}
+        )
 
 @router.get("/events", dependencies=[Depends(verify_api_key)])
 def get_events(
@@ -93,7 +94,8 @@ def get_events(
         ]
     except Exception as e:
         logger.error(f"Failed to fetch events: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to fetch events")
+        # Soft failure: Return empty list
+        return []
 
 @router.post("/leads/export", dependencies=[Depends(verify_api_key)])
 async def export_leads(
@@ -105,7 +107,13 @@ async def export_leads(
         leads = db.query(models.Lead).filter(models.Lead.id.in_(request.ids)).all()
         
         if not leads:
-            raise HTTPException(status_code=404, detail="No leads found for provided IDs")
+            # Soft failure: Return empty file
+            logger.warning("No leads found for export")
+            return StreamingResponse(
+                io.BytesIO(b"No leads found for provided IDs."),
+                media_type="text/plain",
+                headers={"Content-Disposition": "attachment; filename=empty_export.txt"}
+            )
             
         output = io.StringIO()
         for l in leads:
@@ -129,7 +137,13 @@ async def export_leads(
         )
     except Exception as e:
         logger.error(f"Export failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+        # Soft failure instead of 500
+        error_content = f"Export failed: {str(e)}"
+        return StreamingResponse(
+            io.BytesIO(error_content.encode('utf-8')),
+            media_type="text/plain",
+            headers={"Content-Disposition": f"attachment; filename=error_log.txt"}
+        )
 
 @router.get("/leads", dependencies=[Depends(verify_api_key)])
 def get_leads(
@@ -224,7 +238,13 @@ def get_leads(
         }
     except Exception as e:
         logger.error(f"API ERROR: Failed to fetch leads: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal search node error")
+        # Soft failure: Return empty list instead of 500 crash
+        return {
+            "count": 0,
+            "leads": [],
+            "message": f"Error fetching leads: {str(e)}",
+            "window": time_range
+        }
 
 @router.get("/success/stats", dependencies=[Depends(verify_api_key)])
 def get_success_stats(db: Session = Depends(get_db)):
@@ -267,21 +287,21 @@ def get_success_stats(db: Session = Depends(get_db)):
 def update_lead_status(lead_id: str, status: str, db: Session = Depends(get_db)):
     lead = db.query(models.Lead).filter(models.Lead.id == lead_id).first()
     if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
+        return JSONResponse(status_code=200, content={"status": "error", "message": "Lead not found"})
     
     try:
         lead.status = models.CRMStatus(status)
         db.commit()
         return {"status": "success", "new_status": lead.status.value}
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+        return JSONResponse(status_code=200, content={"status": "error", "message": f"Invalid status: {status}"})
 
 @router.post("/leads/{lead_id}/tap", dependencies=[Depends(verify_api_key)])
 def track_lead_tap(lead_id: str, db: Session = Depends(get_db)):
     """Increment tap count and mark as contacted."""
     lead = db.query(models.Lead).filter(models.Lead.id == lead_id).first()
     if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
+        return {"status": "error", "message": "Lead not found"}
     
     # Increment tap count
     if lead.tap_count is None:

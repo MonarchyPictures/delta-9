@@ -3,7 +3,7 @@ import os
 import sys
 import logging
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Add project root to sys.path for absolute imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
@@ -87,7 +87,7 @@ def specialops_mission_task(query: str, location: str = "Kenya", agent_id: str =
     try:
         # Fetch recent leads for duplicate detection
         recent_leads = db.query(models.Lead).filter(
-            models.Lead.timestamp >= datetime.now() - timedelta(hours=24)
+            models.Lead.request_timestamp >= datetime.now(timezone.utc) - timedelta(hours=24)
         ).all()
         recent_texts = [l.buyer_request_snippet for l in recent_leads if l.buyer_request_snippet]
 
@@ -144,6 +144,9 @@ def specialops_mission_task(query: str, location: str = "Kenya", agent_id: str =
                     
                     # Contact Verification
                     is_contact_verified=normalized.get("is_contact_verified", 0),
+                    contact_phone=normalized.get("contact_phone"),
+                    contact_email=normalized.get("contact_email"),
+                    contact_flag=normalized.get("contact_flag", "ok"),
                     contact_reliability_score=normalized.get("contact_reliability_score", 0.0),
                     preferred_contact_method=normalized.get("preferred_contact_method")
                 )

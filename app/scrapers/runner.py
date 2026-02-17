@@ -7,7 +7,7 @@ from app.scrapers import (
     GoogleScraper, FacebookMarketplaceScraper, DuckDuckGoScraper,
     SerpApiScraper, GoogleCSEScraper, ClassifiedsScraper,
     TwitterScraper, InstagramScraper, GoogleMapsScraper,
-    WhatsAppPublicGroupScraper, RedditScraper
+    WhatsAppPublicGroupScraper, RedditScraper, MockScraper
 )
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,7 @@ SCRAPER_CLASSES = {
     "GoogleMapsScraper": GoogleMapsScraper,
     "WhatsAppPublicGroupScraper": WhatsAppPublicGroupScraper,
     "RedditScraper": RedditScraper,
+    "MockScraper": MockScraper,
 }
 
 async def run_scrapers(query: str, location: str = "Kenya") -> List[Dict[str, Any]]:

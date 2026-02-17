@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timedelta
 from sqlalchemy import Column, String, Integer, Boolean, DateTime
+from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.db.base_class import Base
@@ -23,8 +24,9 @@ class Agent(Base):
     next_run_at = Column(DateTime, default=datetime.utcnow, index=True)
     active = Column(Boolean, default=True, index=True)
     is_running = Column(Boolean, default=False, index=True)
+    last_heartbeat = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, server_default=func.now())
 
     raw_leads = relationship("AgentRawLead", back_populates="agent")
 

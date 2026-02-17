@@ -92,8 +92,32 @@ async def run_pipeline(query: str, location: str, headers: Dict[str, Any] = None
 
         # 3. Final De-duplication (by source_url or text hash if URL missing)
         unique_results = {}
+        
+        # 🛠️ DEBUG: Check all_results content type
+        if all_results:
+            logger.info(f"DEBUG: all_results type: {type(all_results)}")
+            logger.info(f"DEBUG: First item type: {type(all_results[0])}")
+            if isinstance(all_results[0], list):
+                logger.error("CRITICAL: all_results contains lists! Flattening...")
+                # Flatten if accidentally nested
+                flat = []
+                for sublist in all_results:
+                    if isinstance(sublist, list):
+                        flat.extend(sublist)
+                    else:
+                        flat.append(sublist)
+                all_results = flat
+
         for lead in all_results:
             # Use URL as primary key, fall back to text hash for URL-less signals
+            if isinstance(lead, list):
+                logger.error(f"SKIPPING LIST ITEM IN LOOP: {lead}")
+                continue
+            
+            if not isinstance(lead, dict):
+                logger.error(f"SKIPPING NON-DICT ITEM ({type(lead)}): {lead}")
+                continue
+                
             url = lead.get('source_url')
             if not url:
                 # Fallback key: Phone + Snippet hash
@@ -114,11 +138,23 @@ async def run_pipeline(query: str, location: str, headers: Dict[str, Any] = None
 
         # 4. Sort by weighted intent score (intent_score * priority_boost)
         def get_weighted_score(lead):
+            if not isinstance(lead, dict):
+                return 0
             base_score = lead.get('intent_score', 0)
             scraper_name = lead.get('_scraper_name')
             boost = 1.0
-            if scraper_name and scraper_name in SCRAPER_METRICS:
-                boost = SCRAPER_METRICS[scraper_name].get('priority_boost', 1.0)
+            
+            # if scraper_name and scraper_name in SCRAPER_METRICS:
+            #     try:
+            #         metric_data = SCRAPER_METRICS[scraper_name]
+            #         if isinstance(metric_data, dict):
+            #             boost = metric_data.get('priority_boost', 1.0)
+            #         else:
+            #             logger.warning(f"DEBUG: SCRAPER_METRICS[{scraper_name}] is not a dict: {type(metric_data)}")
+            #     except Exception as e:
+            #         logger.error(f"DEBUG: Error accessing SCRAPER_METRICS[{scraper_name}]: {e}")
+            boost = 1.0
+                    
             return base_score * boost
 
         final_leads.sort(key=get_weighted_score, reverse=True)
@@ -126,10 +162,17 @@ async def run_pipeline(query: str, location: str, headers: Dict[str, Any] = None
         duration = time.time() - start_time
         logger.info(f"PIPELINE COMPLETE: Found {len(final_leads)} leads for '{query}' in {duration:.2f}s")
         
-        return final_leads
+        # 🛠️ DEBUG METRICS
+        metrics = {
+            "scraped": len(final_leads) + len(getattr(ingestor, 'rejected_leads', [])),
+            "passed": len(final_leads),
+            "rejected": len(getattr(ingestor, 'rejected_leads', []))
+        }
+
+        return final_leads, getattr(ingestor, 'rejected_leads', []), metrics
 
     except Exception as e:
-        logger.error(f"PIPELINE ERROR: {str(e)}")
-        return []
+        logger.exception(f"PIPELINE ERROR: {str(e)}")
+        return [], [], {"error": str(e)}
     finally:
         db.close()

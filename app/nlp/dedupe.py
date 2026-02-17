@@ -28,9 +28,11 @@ def dedupe_leads(leads):
     Remove duplicate leads using semantic similarity of snippet and phone.
     First pass: Exact URL deduplication.
     Second pass: Semantic deduplication.
+    Returns: (unique_leads, rejected_leads)
     """
+    rejected_leads = []
     if not leads: 
-        return leads 
+        return leads, rejected_leads
 
     # 1. Exact URL Deduplication
     unique_by_url = {}
@@ -39,6 +41,10 @@ def dedupe_leads(leads):
         if url:
             if url not in unique_by_url:
                 unique_by_url[url] = lead
+            else:
+                reason = "Duplicate lead (Exact URL match)"
+                logger.info(f"[REJECTED] {url} | Reason: {reason}")
+                rejected_leads.append({**lead, "rejection_reason": reason})
         else:
             # No URL? Treat as unique for now, handle in semantic
             import uuid
@@ -51,7 +57,7 @@ def dedupe_leads(leads):
     model = get_model()
     if not model:
         logger.warning("NLP-Dedupe: Model not loaded, skipping semantic dedupe.")
-        return leads_to_process
+        return leads_to_process, rejected_leads
 
     try:
         from sentence_transformers import util
@@ -81,11 +87,16 @@ def dedupe_leads(leads):
                 similarity = util.cos_sim(embeddings[i], embeddings[j]) 
 
                 if similarity > SIM_THRESHOLD: 
-                    used.add(j) 
+                    used.add(j)
+                    dup_lead = leads_to_process[j]
+                    dup_url = dup_lead.get('url', 'No URL')
+                    reason = f"Duplicate lead (Semantic similarity {similarity.item():.2f})"
+                    logger.info(f"[REJECTED] {dup_url} | Reason: {reason}")
+                    rejected_leads.append({**dup_lead, "rejection_reason": reason})
 
         logger.info(f"NLP-DEDUPE: Reduced to {len(unique)} unique leads (Removed {len(leads) - len(unique)})")
-        return unique
+        return unique, rejected_leads
 
     except Exception as e:
         logger.error(f"NLP-Dedupe Error: {e}")
-        return leads_to_process
+        return leads_to_process, rejected_leads

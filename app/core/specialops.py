@@ -3,7 +3,7 @@ import os
 import requests
 import time
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import quote
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
@@ -393,7 +393,7 @@ class SpecialOpsAgent:
                         "title": title or "Reddit Post",
                         "body": body,
                         "subreddit": url.split("/r/")[1].split("/")[0] if "/r/" in url else "unknown",
-                        "timestamp": str(datetime.now()),
+                        "timestamp": str(datetime.now(timezone.utc)),
                         "comment_count": "0",
                         "author": "public",
                         "content": page.content()

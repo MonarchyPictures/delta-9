@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from ..intelligence.intent import BUYER_PATTERNS
 
@@ -298,7 +298,7 @@ class BuyingIntentNLP:
             if "?" in text_lower and any(kw in text_lower for kw in ["get", "buy", "find", "pata", "iko"]):
                 return "BUYER"
             
-            logger.info(f"❌ Rejected: No explicit buyer signal in: {text_lower[:50]}...")
+            logger.info(f"⚠️ Flagged: No explicit buyer signal in: {text_lower[:50]}...")
             return "UNCLEAR"
         
         # RULE: Personal Intent Verification (Must be first-person or question)
@@ -314,18 +314,18 @@ class BuyingIntentNLP:
         if has_personal_signal or is_buyer_question:
             # Additional check: length (too short posts are usually spam or unclear)
             if len(text_lower) < 10 and not is_buyer_question:
-                logger.info(f"❌ Rejected: Too short: {text_lower[:50]}...")
+                logger.info(f"⚠️ Flagged: Too short: {text_lower[:50]}...")
                 return "UNCLEAR"
             
             # Final check to avoid e-commerce noise: "price is", "buy now"
             if any(s in text_lower for s in ["price is", "buy now", "order today"]) and not "looking for" in text_lower:
-                logger.info(f"❌ Rejected: E-commerce noise: {text_lower[:50]}...")
+                logger.info(f"⚠️ Flagged: E-commerce noise: {text_lower[:50]}...")
                 return "SELLER"
             
             logger.info(f"✅ Accepted: BUYER intent found in: {text_lower[:50]}...")
             return "BUYER"
         
-        logger.info(f"❌ Rejected: No personal intent signal in: {text_lower[:50]}...")
+        logger.info(f"⚠️ Flagged: No personal intent signal in: {text_lower[:50]}...")
         return "UNCLEAR"
 
     def calculate_intent_score(self, text):
@@ -546,3 +546,23 @@ class BuyingIntentNLP:
             points.append(f"Inquire about specific requirements for the {product}.")
             
         return points
+
+    def extract_time(self, text):
+        """Extract time relative to now."""
+        now = datetime.now(timezone.utc)
+        
+        # Simple keywords
+        if "yesterday" in text.lower():
+            return now - timedelta(days=1)
+        if "today" in text.lower():
+            return now
+        
+        # Simple date regex
+        match = re.search(r'\d{1,2}/\d{1,2}/\d{4}', text)
+        if match:
+            try:
+                return datetime.strptime(match.group(), "%d/%m/%Y").replace(tzinfo=timezone.utc)
+            except:
+                pass
+        
+        return now

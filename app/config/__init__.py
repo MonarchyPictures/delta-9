@@ -3,6 +3,7 @@ from app.core.pipeline_mode import PIPELINE_MODE, PIPELINE_CATEGORY, PIPELINE_QU
 
 # Simplified flags
 PROD_STRICT = PIPELINE_MODE == "strict"
+PROD_RELAXED = PIPELINE_MODE == "relaxed"
 BOOTSTRAP = PIPELINE_MODE == "bootstrap"
 
 # --- Render-ready PROD Hardening ---

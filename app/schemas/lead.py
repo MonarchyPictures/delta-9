@@ -13,6 +13,12 @@ class LeadResponse(BaseModel):
     query: Optional[str]
     location: Optional[str]
     confidence: Optional[float]
+    contact_phone: Optional[str]
+    contact_email: Optional[str]
+    contact_flag: Optional[str]
+    verification_flag: Optional[str]
+    intent_type: Optional[str]
+    is_verified_signal: Optional[int]
     created_at: datetime
 
     class Config:

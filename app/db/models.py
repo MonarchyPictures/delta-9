@@ -25,7 +25,7 @@ class Lead(Base):
     __tablename__ = "leads"
     
     # Lead Identification & Metadata
-    id = Column(String, primary_key=True, index=True) # Maps to lead_id
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4) # Maps to lead_id
     agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True, index=True)
     query = Column(String, nullable=True)
     location = Column(String, nullable=True)
@@ -58,8 +58,10 @@ class Lead(Base):
     price = Column(Float, nullable=True) # Extracted price if available
     is_saved = Column(Integer, default=0)
     is_verified_signal = Column(Integer, default=1, index=True) # PROD_STRICT: Signal verification flag
+    verification_flag = Column(String, default="verified") # unverified | verified
     notes = Column(String)
     contact_source = Column(String) # public | inferred | unavailable
+    contact_flag = Column(String, default="ok") # ok | missing_contact
     budget = Column(String) # e.g. "1.1M" or "800k"
     buyer_match_score = Column(Float, default=0.0)
     contact_status = Column(String, default="verified") # verified | needs_outreach
@@ -144,13 +146,13 @@ class Lead(Base):
     content_hash = Column(String, index=True) # Hash of core content
 
     __table_args__ = (
-        UniqueConstraint("agent_id", "source_url", name="uix_agent_url"),
+        UniqueConstraint("source_url", name="uix_source_url"),
         {'extend_existing': True}
     )
 
     # Timestamps
     created_at = Column(DateTime, server_default=func.now(), index=True)
-    updated_at = Column(DateTime, onupdate=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     @property
     def title(self):
@@ -229,7 +231,14 @@ class Lead(Base):
             "geo_score": self.geo_score or 0.0,
             "geo_strength": self.geo_strength or "low",
             "geo_region": self.geo_region or "Global",
-            "ranked_score": self.ranked_score or 0.0
+            "ranked_score": self.ranked_score or 0.0,
+            
+            # New Flags for Frontend Visibility
+            "contact_flag": self.contact_flag,
+            "verification_flag": self.verification_flag,
+            "intent_type": self.intent_type,
+            "contact_email": self.contact_email,
+            "is_verified_signal": self.is_verified_signal
         }
 
 class BuyerLead(Base):

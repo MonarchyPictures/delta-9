@@ -36,13 +36,20 @@ def decide_scrapers(
     for source, config in SCRAPER_REGISTRY.items():
         # 🛡️ SELF-OPTIMIZATION: Filter out auto-disabled weak scrapers
         from .metrics import SCRAPER_METRICS
-        if SCRAPER_METRICS.get(source, {}).get("auto_disabled", False):
+        metrics = SCRAPER_METRICS.get(source, {})
+        if metrics.get("auto_disabled", False):
+            logger.info(f"DEBUG: Skipping {source} because auto_disabled is True")
             continue
 
         # Rule 0: Sandbox scrapers are always included if enabled (for testing)
         if config.get("mode") == "sandbox" and config.get("enabled"):
             active_scrapers.append(source)
             continue
+        
+        # Rule 0.5: Debug scrapers
+        if config.get("mode") == "debug" and config.get("enabled"):
+             active_scrapers.append(source)
+             continue
 
         # Rule 1: Core scrapers are always on
         if config.get("core"):

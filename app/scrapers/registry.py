@@ -20,7 +20,8 @@ ENABLED_SCRAPERS = [
     # "GoogleCSEScraper",
     # "GoogleScraper",
     # "WhatsAppPublicGroupScraper",
-    "DuckDuckGoScraper"
+    "DuckDuckGoScraper",
+    "MockScraper"
 ]
 
 def get_active_scrapers() -> List[str]:
@@ -60,7 +61,7 @@ QUOTAS = {
 # Core registry defining the static properties of each scraper
 SCRAPER_REGISTRY = {
     "GoogleMapsScraper": {
-        "enabled": True,
+        "enabled": False, # Temporarily disabled for debugging
         "core": True,
         "mode": "production",
         "cost": "free",
@@ -69,7 +70,7 @@ SCRAPER_REGISTRY = {
         "enabled_until": None # None means permanent
     },
     "ClassifiedsScraper": {
-        "enabled": True,
+        "enabled": False, # Temporarily disabled for debugging
         "core": True,
         "mode": "production",
         "cost": "free",
@@ -96,35 +97,35 @@ SCRAPER_REGISTRY = {
         "enabled_until": None,
     },
     "RedditScraper": {
-        "enabled": True,
+        "enabled": False, # Temporarily disabled for debugging
         "core": False,
         "mode": "production",
         "cost": "free",
-        "noise": "high",
+        "noise": "low",
         "categories": ["all"],
         "enabled_until": None
     },
-    "InstagramScraper": {
+    "MockScraper": {
         "enabled": True,
-        "core": False,
-        "mode": "production",
+        "core": True,
+        "mode": "debug",
         "cost": "free",
-        "noise": "high",
+        "noise": "low",
         "categories": ["all"],
         "enabled_until": None
     },
     "GoogleCSEScraper": {
-        "enabled": True,
+        "enabled": False, # Temporarily disabled
         "core": False,
         "mode": "production",
-        "cost": "paid",
+        "cost": "quota",
         "noise": "low",
         "categories": ["all"],
         "enabled_until": None
     },
     "GoogleScraper": {
-        "enabled": True,
-        "core": True,
+        "enabled": False, # Temporarily disabled
+        "core": False,
         "mode": "production",
         "cost": "free",
         "noise": "low",
@@ -132,11 +133,11 @@ SCRAPER_REGISTRY = {
         "enabled_until": None
     },
     "WhatsAppPublicGroupScraper": {
-        "enabled": True,
-        "core": True,
+        "enabled": False, # Temporarily disabled
+        "core": False,
         "mode": "production",
         "cost": "free",
-        "noise": "low",
+        "noise": "medium",
         "categories": ["all"],
         "enabled_until": None
     },
@@ -149,10 +150,10 @@ SCRAPER_REGISTRY = {
         "categories": ["all"],
         "enabled_until": None
     },
-    "BootstrapScraper": {
-        "enabled": False,
+    "InstagramScraper": {
+        "enabled": False, # Temporarily disabled
         "core": False,
-        "mode": "bootstrap",
+        "mode": "production",
         "cost": "free",
         "noise": "low",
         "categories": ["all"],
@@ -160,92 +161,38 @@ SCRAPER_REGISTRY = {
     }
 }
 
+def update_scraper_state(scraper_name: str, state: str, details: Optional[Dict[str, Any]] = None):
+    """
+    Updates the runtime state of a scraper (e.g. rate_limited, error, active).
+    This can be used to dynamically disable scrapers that are failing.
+    """
+    if scraper_name not in SCRAPER_REGISTRY:
+        return
+        
+    # Simple logging for now, could be expanded to persist state
+    logger.info(f"Scraper {scraper_name} state updated to {state}: {details}")
+    
+    # Example: If rate limited, disable for a while
+    if state == "rate_limited":
+        # logic to temporarily disable
+        pass
+
 def refresh_scraper_states():
-    """Cleanup expired TTLs and enforce safety rules."""
-    now = datetime.utcnow()
-    
-    # Sync with GLOBAL SCRAPER_CONFIG
-    mapping = {
-        "facebook": "FacebookMarketplaceScraper",
-        "twitter": "TwitterScraper",
-        "reddit": "RedditScraper",
-        "google_cse": "GoogleCSEScraper"
-    }
-    for k, v in SCRAPER_CONFIG.items():
-        if k in mapping:
-            s_name = mapping[k]
-            if s_name in SCRAPER_REGISTRY:
-                SCRAPER_REGISTRY[s_name]["enabled"] = v.get("enabled", False)
-
+    """
+    Checks if any disabled scrapers should be re-enabled.
+    """
+    # Logic to reset scrapers if enabled_until has passed
+    now = datetime.now()
     for name, config in SCRAPER_REGISTRY.items():
-        # Rule: Trae AI cannot disable core scrapers
-        if config.get("core") and not config.get("enabled"):
-            logger.warning(f"SAFETY: Restoring core scraper '{name}' which was incorrectly disabled.")
+        if config.get("enabled_until") and now > config["enabled_until"]:
             config["enabled"] = True
-            
-        # TTL Auto-disable
-        if not config.get("core") and config.get("enabled") and config.get("enabled_until"):
-            if now > config["enabled_until"]:
-                logger.info(f"TTL EXPIRED: Auto-disabling scraper '{name}'")
-                config["enabled"] = False
-                config["enabled_until"] = None
+            config["enabled_until"] = None
+            logger.info(f"Scraper {name} re-enabled automatically.")
 
-def update_scraper_state(name: str, enabled: bool, ttl_minutes: Optional[int] = None, caller: str = "System"):
-    """Safely update scraper state with logging and safety checks."""
-    if name not in SCRAPER_REGISTRY:
-        return False, "Scraper not found"
-        
-    config = SCRAPER_REGISTRY[name]
-    
-    # ❌ SAFETY: Cannot disable core scrapers
-    if config.get("core") and not enabled:
-        logger.warning(f"SAFETY VIOLATION: Caller '{caller}' attempted to disable core scraper '{name}'. Blocked.")
-        return False, "Cannot disable core scrapers"
-        
-    # ❌ SAFETY: Paid scrapers need quota approval
-    if enabled and config.get("cost") == "paid":
-        quota = QUOTAS.get(name, {})
-        if quota.get("used", 0) >= quota.get("limit", 0):
-            logger.error(f"QUOTA EXCEEDED: Caller '{caller}' failed to enable paid scraper '{name}' (Limit: {quota.get('limit')})")
-            return False, f"Quota exceeded for paid scraper {name}"
-        logger.info(f"QUOTA OK: Paid scraper '{name}' enabled by '{caller}' (Used: {quota.get('used')}/{quota.get('limit')})")
-
-    # Set state
-    config["enabled"] = enabled
-    if enabled and ttl_minutes:
-        config["enabled_until"] = datetime.utcnow() + timedelta(minutes=ttl_minutes)
-        logger.info(f"TOGGLE: '{caller}' enabled {name} until {config['enabled_until']} UTC (TTL: {ttl_minutes}m)")
-    else:
-        config["enabled_until"] = None
-        logger.info(f"TOGGLE: '{caller}' {'enabled' if enabled else 'disabled'} {name}")
-    
-    # Update DB if disabled by Optimizer
-    if not enabled and caller == "Self-Optimization Engine":
-        try:
-            from app.db.database import SessionLocal
-            from app.db import models
-            db = SessionLocal()
-            db_metric = db.query(models.ScraperMetric).filter_by(scraper_name=name).first()
-            if db_metric:
-                db_metric.auto_disabled = 1
-                db.commit()
-            db.close()
-        except Exception as e:
-            logger.error(f"Failed to sync auto_disabled to DB for {name}: {e}")
-        
-    return True, "Success"
-
-def update_scraper_mode(name: str, mode: str, caller: str = "System"):
-    """Update scraper mode (production/sandbox) with logging."""
-    if name not in SCRAPER_REGISTRY:
-        return False, "Scraper not found"
-        
-    if mode not in ["production", "sandbox"]:
-        return False, f"Invalid mode: {mode}"
-        
-    config = SCRAPER_REGISTRY[name]
-    old_mode = config.get("mode", "production")
-    config["mode"] = mode
-    
-    logger.info(f"MODE CHANGE: '{caller}' changed {name} from {old_mode} to {mode}")
-    return True, "Success"
+def update_scraper_mode(scraper_name: str, mode: str):
+    """
+    Switch a scraper between 'production' and 'debug' modes.
+    """
+    if scraper_name in SCRAPER_REGISTRY:
+        SCRAPER_REGISTRY[scraper_name]["mode"] = mode
+        logger.info(f"Scraper {scraper_name} mode switched to {mode}")

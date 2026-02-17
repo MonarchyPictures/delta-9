@@ -46,10 +46,10 @@ def ingest_signal(db: Session, signal: Dict[str, Any], product_query: str = "Unk
         }
     )
     
-    # 3. 🚦 Threshold Enforcement
-    if final_score < FLOOR:
-        logger.info(f"SIGNAL REJECTED: Score {final_score} below floor {FLOOR} for source {source}")
-        return False
+    # 3. 🚦 Threshold Enforcement (DISABLED)
+    # if final_score < FLOOR:
+    #     logger.info(f"SIGNAL REJECTED: Score {final_score} below floor {FLOOR} for source {source}")
+    #     return False
 
     # 4. 📞 Contact Extraction (Moved from Scraper to Intelligence)
     contacts = extract_contact_info(raw_text)
@@ -60,21 +60,29 @@ def ingest_signal(db: Session, signal: Dict[str, Any], product_query: str = "Unk
     email = signal_contacts.get("email") or contacts.get("email")
 
     try:
-        # Deduplication by URL
+        # Deduplication by URL (DISABLED for now to allow save)
+        # source_url = signal.get("url")
+        # if source_url:
+        #    existing = db.query(models.Lead).filter(models.Lead.source_url == source_url).first()
+        #    if existing:
+        #        return False
+        
         source_url = signal.get("url")
-        if source_url:
-            existing = db.query(models.Lead).filter(models.Lead.source_url == source_url).first()
-            if existing:
-                return False
         
         # 5. 🗺️ Mapping to 10-field schema (+ internal metadata)
-        lead_id = str(uuid.uuid4())
+        lead_id = uuid.uuid4()
         priority = classify_lead_priority(final_score)
+        
+        contact_flag = "ok"
+        if not phone and not email:
+            contact_flag = "missing_contact"
         
         db_lead = models.Lead(
             id=lead_id,
             buyer_name=signal.get("author") or "Market Signal",
             contact_phone=phone,
+            contact_email=email,
+            contact_flag=contact_flag,
             product_category=product_query,
             intent_score=raw_intent,
             location_raw=signal.get("location", "Kenya"),

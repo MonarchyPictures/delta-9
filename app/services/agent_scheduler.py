@@ -5,10 +5,12 @@ import signal
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import update
+from sqlalchemy.sql import func
 from app.db.database import SessionLocal
 from app.models.agent import Agent
 from app.services.pipeline import run_pipeline_for_query
 from app.utils.notifications import notify_new_leads
+from app.services.deduplication_service import upsert_lead_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +26,16 @@ def reset_stale_agents(db: Session, timeout_minutes: int = 60):
     """
     try:
         # Reset agents that are marked running but haven't updated in timeout_minutes
-        # Since we don't have last_heartbeat, we reset all running agents at startup/recovery
-        # For stricter handling, we'd need a last_heartbeat column.
+        # Using last_heartbeat if available
+        now = datetime.utcnow()
+        limit = now - timedelta(minutes=timeout_minutes)
         
-        # PROD FIX: Only reset if we are sure they are stale. 
-        # For now, we assume if this runs, it's a recovery or maintenance task.
         stmt = (
             update(Agent)
             .where(Agent.is_running == True)
+            # If last_heartbeat is null, assume it's stale (crashed before first heartbeat)
+            # OR if last_heartbeat is older than limit
+            .where((Agent.last_heartbeat < limit) | (Agent.last_heartbeat == None))
             .values(is_running=False)
         )
         result = db.execute(stmt)
@@ -74,7 +78,7 @@ def _lock_agent_atomic_sync(agent_id_str):
         stmt = (
             update(Agent)
             .where(Agent.id == agent_uuid, Agent.is_running == False, Agent.active == True)
-            .values(is_running=True)
+            .values(is_running=True, last_heartbeat=func.now())
         )
         result = db.execute(stmt)
         db.commit()
@@ -101,6 +105,19 @@ def _lock_agent_atomic_sync(agent_id_str):
     finally:
         db.close()
 
+def _heartbeat_sync(agent_id_str):
+    """Update agent heartbeat."""
+    db = SessionLocal()
+    try:
+        agent_uuid = uuid.UUID(agent_id_str)
+        stmt = update(Agent).where(Agent.id == agent_uuid).values(last_heartbeat=func.now())
+        db.execute(stmt)
+        db.commit()
+    except Exception as e:
+        logger.error(f"Heartbeat failed for {agent_id_str}: {e}")
+    finally:
+        db.close()
+
 def _save_results_and_unlock_sync(agent_id_str, leads, agent_data):
     """Save leads, notify, and update next run time."""
     db = SessionLocal()
@@ -111,16 +128,14 @@ def _save_results_and_unlock_sync(agent_id_str, leads, agent_data):
         if not agent:
             return
             
-        # Save leads
+        # Save leads ATOMICALLY
         saved_count = 0
         if leads:
             for lead in leads:
-                # Use merge to handle existing IDs/detached instances
-                try:
-                    db.merge(lead) 
+                # Use Atomic Upsert
+                saved_lead = upsert_lead_atomic(db, lead)
+                if saved_lead:
                     saved_count += 1
-                except Exception as e:
-                    logger.error(f"Error saving lead {lead.id}: {e}")
                 
         # Update Agent Schedule
         # Handle next_run_at being None or offset-naive
@@ -186,6 +201,21 @@ def reset_agents_on_startup():
 
 # --- Async Functions ---
 
+async def heartbeat_loop(agent_id: str, stop_event: asyncio.Event):
+    """Keep the agent alive in DB."""
+    while not stop_event.is_set():
+        try:
+            await asyncio.to_thread(_heartbeat_sync, agent_id)
+        except Exception as e:
+            logger.error(f"Heartbeat loop error: {e}")
+        
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=10)
+        except asyncio.TimeoutError:
+            continue
+        except Exception:
+            break
+
 async def execute_agent(agent_id: str):
     """
     Execute a single agent cycle with timeout protection.
@@ -197,6 +227,10 @@ async def execute_agent(agent_id: str):
         return
 
     logger.info(f"[AGENT START] {agent_data['name']}")
+    
+    # Start Heartbeat
+    stop_heartbeat = asyncio.Event()
+    heartbeat_task = asyncio.create_task(heartbeat_loop(agent_id, stop_heartbeat))
 
     try:
         # 2. Run Pipeline (Async) with TIMEOUT
@@ -208,16 +242,24 @@ async def execute_agent(agent_id: str):
             run_pipeline_for_query(agent_data['query'], location=location),
             timeout=600 # 10 minutes
         )
+        
+        # Stop heartbeat before saving
+        stop_heartbeat.set()
+        await heartbeat_task
 
         # 3. Save & Unlock (Thread)
         await asyncio.to_thread(_save_results_and_unlock_sync, agent_id, results, agent_data)
 
     except asyncio.TimeoutError:
         logger.error(f"[AGENT TIMEOUT] Agent {agent_data['name']} timed out after 600s")
+        stop_heartbeat.set()
+        await heartbeat_task
         await asyncio.to_thread(_unlock_on_error_sync, agent_id)
         
     except Exception as e:
         logger.error(f"[AGENT ERROR] {e}")
+        stop_heartbeat.set()
+        await heartbeat_task
         # Unlock (Thread)
         await asyncio.to_thread(_unlock_on_error_sync, agent_id)
 

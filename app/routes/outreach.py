@@ -17,7 +17,8 @@ def open_whatsapp(lead_id: str, db: Session = Depends(get_db)):
         lead = db.query(models.Lead).filter(models.Lead.id == lead_id).first()
     
     if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
+        # Soft failure
+        return {"url": None, "error": "Lead not found", "detail": f"No lead with ID {lead_id}"}
     
     # Generate the personalized message
     message = generate_message(lead)
@@ -30,7 +31,12 @@ def open_whatsapp(lead_id: str, db: Session = Depends(get_db)):
         # Fallback: check if the link itself is a whatsapp link
         if lead.link and "wa.me" in lead.link:
             return {"url": lead.link}
-        raise HTTPException(status_code=400, detail="Lead has no contact phone number")
+        # Soft failure instead of 400
+        return {
+            "url": None, 
+            "error": "No phone number available", 
+            "detail": "Lead has no contact phone number"
+        }
         
     return {
         "url": whatsapp_link(phone, message)
@@ -46,7 +52,7 @@ def outreach(lead_id: str, db: Session = Depends(get_db)):
         lead = db.query(models.Lead).filter(models.Lead.id == lead_id).first()
     
     if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
+        return {"error": "Lead not found", "lead_id": lead_id}
     
     # 📝 INJECT CALCULATED SCORES FOR MESSAGE LOGIC
     # The OutreachEngine needs buyer_match_score to decide which message to send.

@@ -4,7 +4,7 @@ logger = logging.getLogger(__name__)
 
 from .buyer_classifier import get_intent_score
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 def calculate_buyer_score(lead: dict, target_location: str = "Nairobi") -> float:
     """
@@ -37,14 +37,18 @@ def calculate_buyer_score(lead: dict, target_location: str = "Nairobi") -> float
     posted_at = lead.get("posted_at")
     if isinstance(posted_at, str):
         try:
-            posted_at = datetime.strptime(posted_at, "%Y-%m-%d")
+            posted_at = datetime.strptime(posted_at, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         except:
-            posted_at = datetime.now()
+            posted_at = datetime.now(timezone.utc)
     
     if not posted_at:
-        posted_at = datetime.now()
+        posted_at = datetime.now(timezone.utc)
         
-    if datetime.now() - posted_at <= timedelta(hours=48):
+    # Ensure posted_at is timezone-aware if naive
+    if posted_at.tzinfo is None:
+        posted_at = posted_at.replace(tzinfo=timezone.utc)
+        
+    if datetime.now(timezone.utc) - posted_at <= timedelta(hours=48):
         score += 25
         
     # 📱 Contact available? +10

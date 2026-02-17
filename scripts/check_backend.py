@@ -2,7 +2,7 @@ import requests
 import time
 
 def check_backend():
-    url = "http://127.0.0.1:8000/health"
+    url = "http://localhost:8000/health"
     print(f"Checking backend at {url}...")
     for i in range(10):
         try:

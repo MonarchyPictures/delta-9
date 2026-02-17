@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from app.nlp.intent_service import BuyingIntentNLP
 from app.utils.geo_service import GeoService
 from app.utils.verification import ContactVerifier
@@ -137,7 +137,7 @@ class LeadValidator:
         p_strategy = self.market.recommend_pricing_strategy(lead_data_for_points)
         
         return {
-            "id": str(uuid.uuid4()),
+            "id": uuid.uuid4(),
             "source_platform": raw_data.get("source", "Unknown"),
             "source_url": social_link,
             "timestamp": datetime.now(),
@@ -148,6 +148,9 @@ class LeadValidator:
             "intent_type": classification,
             "product_category": product_for_market,
             "buyer_name": buyer_name,
+            "contact_phone": phone_to_save,
+            "contact_email": email_to_save,
+            "contact_flag": "missing_contact" if not (phone_to_save or email_to_save) else "ok",
             "intent_score": intent_score,
             "confidence_score": confidence_score,
             "_all_products": entities.get("products", []),
@@ -159,65 +162,45 @@ class LeadValidator:
             "product_specs": specs,
             "deal_probability": deal_prob,
             
-            # NEW: Smart Matching
-            "match_score": match_score,
+            "buyer_match_score": match_score,
             "compatibility_status": compat_status,
             "match_details": match_details,
-            
-            # NEW: Intent Extensions
-            "quantity_requirement": quantity,
             "payment_method_preference": payment,
-            
-            # NEW: Local Advantage
             "delivery_range_score": delivery_score,
             "neighborhood": neighborhood,
             "local_pickup_preference": pickup,
             "delivery_constraints": constraints,
-            
-            # NEW: Deal Readiness
             "decision_authority": authority,
             "prior_research_indicator": research,
             "comparison_indicator": comparison,
-            "upcoming_deadline": deadline,
-
-            # NEW: Comprehensive Lead Intelligence
-            "buyer_history": buyer_prof["history"],
-            "platform_activity_level": buyer_prof["activity_level"],
-            "past_response_rate": buyer_prof["response_rate"],
-            "market_price_range": m_context["price_range"],
-            "seasonal_demand": m_context["seasonality"],
-            "supply_status": m_context["supply_status"],
-            "conversion_signals": conv_signals,
-            "talking_points": t_points,
-            "competitive_advantages": advantages,
-            "pricing_strategy": p_strategy,
-            
-            # Real-Time & Competitive Intelligence
-            "availability_status": availability,
-            "competition_count": comp_count,
-            "is_unique_request": 1 if is_unique else 0,
-            "optimal_response_window": opt_window,
-            "peak_response_time": peak_time,
-            
-            # Contact Verification & Reliability
-            "is_contact_verified": 1,
+            "upcoming_deadline": deadline.isoformat() if deadline else None,
+            "availability_status": "active" if budget_ready else "pending",
+            "competition_count": self._estimate_competition(text),
+            "is_unique_request": True, # Should be calculated via dedupe
+            "optimal_response_window": self._calculate_response_window(urgency),
+            "peak_response_time": datetime.now(timezone.utc).strftime("%H:%M"),
+            "is_contact_verified": is_phone_v or is_email_v or is_social_v,
             "contact_reliability_score": reliability_score,
             "preferred_contact_method": preferred_method,
-            "disposable_email_flag": 1 if email_meta.get("is_disposable") else 0,
-            "contact_metadata": {
-                "phone": phone_meta,
-                "email": email_meta,
-                "social_verified": is_social_v
-            },
-            "non_response_flag": 0,
-            
-            "verification_badges": badges,
-            "is_genuine_buyer": 1 if is_genuine else 0,
-            "contact_phone": phone_to_save,
-            "contact_email": email_to_save,
-            "source_url": social_link,
-            "notes": f"Readiness: {readiness} | Deal Prob: {deal_prob}% | Specs: {specs}",
-            "last_activity": datetime.now()
+            "disposable_email_flag": email_meta.get("disposable", False),
+            "contact_metadata": json.dumps(phone_meta if phone_meta else email_meta),
+            "average_response_time_mins": 0,
+            "conversion_rate": 0,
+            "buyer_history": "",
+            "platform_activity_level": "medium",
+            "past_response_rate": 0,
+            "market_price_range": f"{entities.get('price', 0) * 0.9}-{entities.get('price', 0) * 1.1}",
+            "seasonal_demand": self.market.get_seasonality(entities["products"]),
+            "supply_status": "low",
+            "conversion_signals": "",
+            "talking_points": self.market.generate_talking_points(entities["products"]),
+            "competitive_advantages": self.market.get_advantages(entities["products"]),
+            "pricing_strategy": "dynamic",
+            "verification_badges": "verified" if is_phone_v else "none",
+            "is_genuine_buyer": intent_score > 0.6,
+            "last_activity": datetime.now(timezone.utc),
+            "rank_score": 0.0,
+            "content_hash": hashlib.md5(text.encode('utf-8')).hexdigest()
         }
 
     def _calculate_smart_match(self, products, specs, db=None):

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 logger = logging.getLogger(__name__)
@@ -74,15 +74,15 @@ class BuyerBehaviorEngine:
         }
 
         # Time decay factor (events from the last hour have weight 1.0, older ones decay)
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         
         for log in activity_logs:
             meta = log.extra_metadata or {}
             
             # Calculate time weight (simple linear decay over 24h)
             log_time = log.timestamp
-            if hasattr(log_time, 'tzinfo') and log_time.tzinfo:
-                log_time = log_time.replace(tzinfo=None)
+            if log_time.tzinfo is None:
+                log_time = log_time.replace(tzinfo=timezone.utc)
             
             hours_ago = (now - log_time).total_seconds() / 3600
             time_weight = max(0.1, 1.0 - (hours_ago / 24.0))

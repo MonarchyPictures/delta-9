@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 class LeadUtils:
     @staticmethod
@@ -34,7 +34,7 @@ class LeadUtils:
             "lead_id": f"LGD-{uuid.uuid4().hex[:6].upper()}",
             "source_platform": platform,
             "post_link": post_link,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "location": location or LeadUtils.infer_location(text),
             "radius_km": 0,
             "buyer_request_snippet": text[:200] + "..." if len(text) > 200 else text,

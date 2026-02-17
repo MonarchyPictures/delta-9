@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import List
 import uuid
@@ -31,7 +32,7 @@ def mark_as_read(notification_id: str, db: Session = Depends(get_db)):
     try:
         notification_uuid = uuid.UUID(notification_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid notification ID format")
+        return JSONResponse(status_code=200, content={"status": "error", "message": "Invalid notification ID format"})
 
     notification = (
         db.query(Notification)
@@ -40,9 +41,17 @@ def mark_as_read(notification_id: str, db: Session = Depends(get_db)):
     )
 
     if not notification:
-        raise HTTPException(status_code=404, detail="Notification not found")
+        # Soft failure: if it's not found, maybe it was already deleted. Just say ok or error.
+        return JSONResponse(status_code=200, content={"status": "error", "message": "Notification not found"})
 
     notification.read = True
     db.commit()
 
     return {"status": "ok"}
+
+
+@router.delete("/")
+def clear_all_notifications(db: Session = Depends(get_db)):
+    db.query(Notification).delete(synchronize_session=False)
+    db.commit()
+    return {"status": "ok", "message": "All notifications cleared"}

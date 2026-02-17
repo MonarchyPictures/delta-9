@@ -3,7 +3,7 @@ import requests
 import time
 from datetime import datetime
 
-API_URL = "http://127.0.0.1:8000"
+API_URL = "http://localhost:8000"
 
 def test_live_feed():
     print("--- Testing Live Feed Order ---")

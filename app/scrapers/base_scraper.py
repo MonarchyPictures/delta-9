@@ -86,7 +86,20 @@ class BaseScraper(ABC):
                 ) 
         
                 page = context.new_page() 
-                page.goto(url, timeout=45000) 
+                
+                # Retry mechanism for navigation
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        page.goto(url, timeout=45000)
+                        break
+                    except Exception as e:
+                        if attempt == max_retries - 1:
+                            logger.error(f"Failed to navigate to {url} after {max_retries} attempts: {e}")
+                            raise e
+                        logger.warning(f"Navigation to {url} failed (attempt {attempt+1}/{max_retries}), retrying in 2s...")
+                        import time
+                        time.sleep(2 * (attempt + 1)) # Exponential backoff
         
                 for text in ["Accept", "Accept all", "I agree"]: 
                     try: 

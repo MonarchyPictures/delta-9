@@ -16,7 +16,7 @@ FINANCIAL_KEYWORDS = BUYER_PATTERNS
 URGENCY_KEYWORDS = BUYER_PATTERNS
 LOCAL_CONTEXT = BUYER_PATTERNS
 
-# ❌ SELLER KEYWORDS (Hard Reject - DROP IT)
+# ⚠️ SELLER KEYWORDS (Flagging Only - Do Not Drop)
 # Generalized to remove vehicle-specific "full duty paid", "accepting trade-ins" etc.
 SELLER_KEYWORDS = [
     "for sale", "selling", "units available", "brand new", "dealers", "showroom", 
@@ -24,7 +24,7 @@ SELLER_KEYWORDS = [
     "wholesale", "retail", "special offer", "discount", "order now"
 ]
 
-# ❌ NEGATIVE / NON-BUYER INTENT (Immediate Disqualification)
+# ⚠️ NEGATIVE / NON-BUYER INTENT (Flagging Only)
 NEGATIVE_INTENT = [
     "free", "not buying", "just looking", "too expensive", "no money", "fake", "scam", "not interested",
     "ya bure", "sitanunua", "naangalia tu", "ni ghali", "sina pesa", "ni feki", "si serious", "siko interested",
@@ -35,31 +35,30 @@ NEGATIVE_INTENT = [
 SELLER_PATTERNS = SELLER_KEYWORDS
 
 # 🎯 STRICT BUYER GATEKEEPERS (Legacy support - now using BUYER_KEYWORDS)
-STRICT_BUYER_KEYWORDS = BUYER_KEYWORDS
+STRICT_BUYER_KEYWORDS = BUYER_PATTERNS
 
 def classify_post(text: str) -> str:
     """
-    Strictly classifies a post as 'buyer' or 'seller' based on intent rules.
-    RULE: If a post matches ANY seller keyword -> DROP IT (return 'seller'), 
-    even if it has buyer words.
+    Classifies a post as 'buyer' or 'seller' based on intent rules.
+    Used for intent tagging (Soft Flagging).
     """
     if not text:
         return "unclear"
     
     t = text.lower()
 
-    # 1. HARD REJECT: Seller Keywords (Priority #1)
+    # 1. Seller Keywords (Priority #1)
     # Exception: "anyone selling", "wholesale price", "supplier needed" are common buyer phrases
     if any(phrase in t for phrase in SELLER_KEYWORDS) and not any(bp in t for bp in ["anyone selling", "wholesale price", "supplier needed", "rfq", "quotation", "any supplier", "supplier of"]):
-        return "seller"
+        return "potential_seller"
 
     # 2. Check for Negative Intent
     if any(phrase in t for phrase in NEGATIVE_INTENT):
-        return "seller"
+        return "potential_seller"
 
     # 3. CORE LOGIC: Use is_buyer_intent
     if not is_buyer_intent(text):
-        return "seller"
+        return "potential_seller"
     
     return "buyer"
 

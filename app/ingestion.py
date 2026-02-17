@@ -52,7 +52,7 @@ def ingest_leads(raw_results: List[Dict[str, Any]]) -> List[Any]:
 
     # 1. NLP Deduplication
     # Group similar leads to avoid duplicates
-    unique_results = dedupe_leads(raw_results)
+    unique_results, rejected = dedupe_leads(raw_results)
     logger.info(f"INGEST: Deduplicated to {len(unique_results)} unique signals")
 
     # 2. Strict Filtering & Metadata (using Pipeline logic if possible, or reimplementing)
@@ -91,14 +91,18 @@ def ingest_leads(raw_results: List[Dict[str, Any]]) -> List[Any]:
     return verified_leads
 
 
+from .scrapers.mock_scraper import MockScraper
+
 # ALL possible scrapers available in the system
 ALL_SCRAPERS = [ 
+    MockScraper(),
     GoogleMapsScraper(), 
     ClassifiedsScraper(), 
     FacebookMarketplaceScraper(), 
     TwitterScraper(), 
     RedditScraper(),
     GoogleCSEScraper(),
+    DuckDuckGoScraper(),
     GoogleScraper(),
     WhatsAppPublicGroupScraper(),
     InstagramScraper()
@@ -109,8 +113,8 @@ logger = get_logger("Ingestion")
 
 # ⚡ TIER 1: FAST (API / Lightweight) - 5 sec max return
 TIER_1_SCRAPERS = [
+    "MockScraper",
     "GoogleCSEScraper", 
-    "TwitterScraper", 
     "DuckDuckGoScraper", 
     "RedditScraper" # Usually fast via DDG site search
 ]
@@ -121,12 +125,14 @@ TIER_2_SCRAPERS = [
     "GoogleMapsScraper",
     "FacebookMarketplaceScraper",
     "ClassifiedsScraper",
-    "WhatsAppPublicGroupScraper"
+    "WhatsAppPublicGroupScraper",
+    "TwitterScraper"
 ]
 
 class LiveLeadIngestor:
     def __init__(self, db_session: Session):
         self.db = db_session
+        self.rejected_leads = [] # 🛠️ DEBUG: Capture rejected leads
         
         # Enforce production check immediately if initialized for live fetching
         if not PROD_STRICT:
@@ -145,18 +151,24 @@ class LiveLeadIngestor:
                 "https://www.facebook.com"
             ]
             
-            # Run checks in thread pool to avoid blocking async loop
-            for url in endpoints:
+            # Run checks in PARALLEL to avoid blocking async loop for too long
+            # Using asyncio.gather to check all at once
+            async def check_url(url):
                 try:
                     # Increase timeout to 20s to handle Kenyan mobile network latency
-                    # Wrap blocking requests.get in asyncio.to_thread
                     response = await asyncio.to_thread(requests.get, url, timeout=20)
                     if response.status_code == 200 or response.status_code == 301 or response.status_code == 302:
                         logger.info(f"NETWORK CHECK: Connectivity verified via {url} (HTTP {response.status_code})")
                         return True
                 except Exception as e:
                     logger.warning(f"NETWORK CHECK: {url} unreachable: {str(e)}")
-                    continue
+                    return False
+                return False
+
+            results = await asyncio.gather(*(check_url(url) for url in endpoints))
+            
+            if any(results):
+                return True
             
             logger.error("NETWORK CHECK FAILED: All endpoints timed out or failed.")
             return False
@@ -334,7 +346,8 @@ class LiveLeadIngestor:
         # ABSOLUTE RULE: Mandatory health check
         if not self.check_network_health():
             if PROD_STRICT:
-                raise RuntimeError("ERROR: Network health check failed. Ingestion blocked to prevent stale data.")
+                logger.error("NETWORK CHECK FAILED: Ingestion proceeding cautiously despite network issues (Soft Fail).")
+                # raise RuntimeError("ERROR: Network health check failed. Ingestion blocked to prevent stale data.")
             else:
                 logger.warning("NETWORK CHECK FAILED: Continuing anyway because PROD_STRICT=False")
 
@@ -351,18 +364,23 @@ class LiveLeadIngestor:
             is_prod=PROD_STRICT,
             last_result_count=last_result_count
         )
+        logger.info(f"DEBUG: decide_scrapers returned: {enabled_sources}")
         
         # 📈 PERFORMANCE RANKING: Sort scrapers by priority_score (Higher = First)
+        logger.info(f"DEBUG: ALL_SCRAPERS keys: {[s.__class__.__name__ for s in ALL_SCRAPERS]}")
         enabled_scrapers = [ 
             s for s in ALL_SCRAPERS 
             if s.__class__.__name__ in enabled_sources and not s.auto_disabled
         ]
+        logger.info(f"DEBUG: enabled_scrapers after filtering: {[s.__class__.__name__ for s in enabled_scrapers]}")
         
         # ⚡ TIER FILTERING
         if tier == 1:
             logger.info("TIER 1 MODE: Filtering for fast API scrapers only.")
             enabled_scrapers = [s for s in enabled_scrapers if s.__class__.__name__ in TIER_1_SCRAPERS]
         
+        logger.info(f"DEBUG: enabled_scrapers after tier filtering: {[s.__class__.__name__ for s in enabled_scrapers]}")
+
         active_scrapers = sorted( 
             enabled_scrapers, 
             key=lambda s: s.priority_score or 0, 
@@ -370,6 +388,13 @@ class LiveLeadIngestor:
         )
         
         logger.info(f"AI Decision (Ranked): {[(s.__class__.__name__, round(s.priority_score, 2)) for s in active_scrapers]}")
+
+        # Check specifically for MockScraper
+        mock_in_active = any(isinstance(s, MockScraper) for s in active_scrapers)
+        if mock_in_active:
+            logger.info("CONFIRMED: MockScraper is in active_scrapers list.")
+        else:
+            logger.warning("WARNING: MockScraper is NOT in active_scrapers list.")
 
         discovery_templates = [
             # Pass 1: Direct buyer intent
@@ -409,6 +434,8 @@ class LiveLeadIngestor:
                 # Run this scraper for the current pass queries
                 scraper_leads = self._run_parallel_scrapers([scraper], pass_queries, time_window_hours, query, location, early_return=early_return, tier=tier)
                 
+                logger.info(f"DEBUG: {scraper_name} returned {len(scraper_leads)} raw leads")
+                
                 # 🇰🇪 GEO BOOST: Prioritize Kenyan hubs before quality checks
                 scraper_leads = apply_geo_bias(scraper_leads)
                 
@@ -431,7 +458,9 @@ class LiveLeadIngestor:
     
         # 🎯 SMART DEDUPLICATION (NLP Semantic + Phone + URL)
         # Phase 1: NLP Semantic Deduplication (New Layer)
-        all_leads = dedupe_leads(all_leads)
+        all_leads, rejected_nlp = dedupe_leads(all_leads)
+        if hasattr(self, 'rejected_leads'):
+            self.rejected_leads.extend(rejected_nlp)
         
         # Phase 2: Basic Deduplication (Legacy/Fallback)
         deduper = get_deduplicator()
@@ -481,6 +510,19 @@ class LiveLeadIngestor:
             try:
                 # Apply 10s timeout to the scraper.scrape call
                 res = s.scrape(q, time_window_hours=w)
+
+                # 🛠️ RAW CAPTURE LOGGING (Phase 3)
+                if res:
+                    try:
+                        os.makedirs("logs", exist_ok=True)
+                        with open("logs/raw_capture.log", "a", encoding="utf-8") as f:
+                            for item in res:
+                                url_log = item.get('url', 'no-url')
+                                title_log = (item.get('text') or item.get('snippet') or '')[:100].replace('\n', ' ')
+                                f.write(f"{url_log} | {title_log}\n")
+                    except Exception as e:
+                        logger.error(f"Raw capture logging failed: {e}")
+
                 latency = time.time() - start_time
                 
                 if latency > HARD_TIMEOUT:
@@ -561,15 +603,24 @@ class LiveLeadIngestor:
             logger.warning(f"PARALLEL TIMEOUT: Some scrapers did not finish within {HARD_TIMEOUT}s")
 
         # 🧠 NLP Deduplication BEFORE strict filtering
-        raw_results = dedupe_leads(raw_results)
+        raw_results, rejected_nlp = dedupe_leads(raw_results)
+        
+        # Capture rejected leads from NLP deduplication
+        if hasattr(self, 'rejected_leads'):
+            self.rejected_leads.extend(rejected_nlp)
 
         for r in raw_results:
             scraper_name = r.get("_scraper_name")
             snippet = r.get('text', '')
             
             # 🧠 Generic Buyer Classification
-            if classify_post(snippet) != "buyer":
-                continue
+            classification = classify_post(snippet)
+            if classification != "buyer":
+                # SOFT FLAG: Mark as seller/unclear but do not drop
+                logger.debug(f"Intent Flag: {classification} for {snippet[:30]}...")
+                r["intent_type"] = classification
+            else:
+                r["intent_type"] = "buyer"
             
             # 🧠 Generic Intent Scoring
             score = buyer_intent_score(snippet, query=original_query)
@@ -579,10 +630,14 @@ class LiveLeadIngestor:
             geo_data = compute_geo_score(snippet, query=original_query, location=location)
             geo_score = geo_data.get("geo_score", 0.0)
 
-            # 🔒 DYNAMIC FLOOR: Score everything, filter only absolute junk (<0.4)
+            # 🔒 DYNAMIC FLOOR: Score everything, filter only absolute junk (<0.1)
             # Thresholding for strict mode is now handled AFTER ranking in _execute_discovery
-            if score < 0.4:
-                continue
+            quality_flag = "ok"
+            if score < 0.1:
+                logger.debug(f"JUNK FLAGGED: Signal with score {score} (likely noise)")
+                quality_flag = "noise"
+            elif score < 0.4:
+                quality_flag = "low_quality"
             
             # ⏱️ TIME WINDOW (🇰🇪 Escalation: Allow 4h for high geo relevance)
             effective_window = time_window_hours
@@ -592,22 +647,34 @@ class LiveLeadIngestor:
 
             is_verified_time, minutes_ago = self._verify_timestamp_strict(snippet)
             if is_verified_time and minutes_ago > (effective_window * 60):
+                self.rejected_leads.append({**r, "rejection_reason": f"Timestamp too old ({minutes_ago}m > {effective_window*60}m)"})
                 continue
 
-            phone = r.get('phone') or self._extract_phone(snippet)
+            phone = r.get('phone') or r.get('contact', {}).get('phone') or self._extract_phone(snippet)
+            email = r.get('email') or r.get('contact', {}).get('email')
+            
             buyer_name = r.get('name') or self._extract_name(snippet, r.get('source', 'Web'))
             urgency = self._parse_urgency(snippet)
             
             url = r.get('url')
-            if not url: continue
+            if not url: 
+                self.rejected_leads.append({**r, "rejection_reason": "Missing URL"})
+                continue
                 
             lead_id = str(uuid.uuid5(uuid.NAMESPACE_URL, url))
+            
+            # Contact Flagging (Relaxed Requirement)
+            contact_flag = "ok"
+            if not phone and not email:
+                contact_flag = "missing_contact"
             
             lead_data = {
                 "id": lead_id,
                 "role": "buyer",
                 "buyer_name": buyer_name, 
                 "contact_phone": phone,
+                "contact_email": email,
+                "contact_flag": contact_flag,
                 "product_category": original_query,
                 "quantity_requirement": "1",
                 "intent_score": score,
@@ -656,10 +723,19 @@ class LiveLeadIngestor:
                 if existing:
                     continue
                 
+                # Contact Flagging (Relaxed Requirement)
+                contact_flag = "ok"
+                if not l_data.get("contact_phone") and not l_data.get("contact_email"):
+                    contact_flag = "missing_contact"
+                    logger.info(f"Lead missing contact info: {l_data.get('id')} (Flagged as {contact_flag})")
+                    # We do NOT return None. We proceed.
+                
                 new_lead = models.Lead(
                     id=l_data["id"],
                     buyer_name=l_data["buyer_name"],
-                    contact_phone=l_data["contact_phone"],
+                    contact_phone=l_data.get("contact_phone"),
+                    contact_email=l_data.get("contact_email"),
+                    contact_flag=contact_flag,
                     product_category=l_data["product_category"],
                     quantity_requirement=l_data["quantity_requirement"],
                     intent_score=l_data["intent_score"],

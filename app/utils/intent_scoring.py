@@ -1,6 +1,7 @@
 import re
 import logging
 from typing import Tuple, List, Dict, Any
+from app.config.runtime import INTENT_THRESHOLD
 
 # Use the robust NLP service (Singleton pattern via module variable)
 from ..nlp.intent_service import BuyingIntentNLP
@@ -49,19 +50,12 @@ class IntentScorer:
             return True
             
         if classification == "SELLER":
-            logger.debug(f"validate_lead: Rejected as SELLER: {text[:50]}...")
-            return False
+            logger.info(f"validate_lead: Soft Flagged as SELLER (will be ingested with low confidence): {text[:50]}...")
+            return True  # Soft flagging: allow ingestion but it will be scored low/flagged elsewhere
             
-        # If UNCLEAR, we might still accept if score is high enough (fallback)
-        # But for strict production, we prefer explicit BUYER signal.
-        # Let's check the score as a tie-breaker for UNCLEAR.
-        score = self.calculate_intent_score(text)
-        if score >= 0.6: # High threshold for unclear text
-            logger.info(f"validate_lead: Rescued UNCLEAR lead with high score ({score}): {text[:50]}...")
-            return True
-            
-        logger.debug(f"validate_lead: Rejected as {classification} (Score: {score}): {text[:50]}...")
-        return False
+        # If UNCLEAR, we accept it (soft flagging handles quality downstream)
+        # We rely on confidence_score and intent_type fields on the Lead model
+        return True
 
     def validate_lead_debug(self, text: str) -> Dict[str, Any]:
         """Debug version of validate_lead that returns reasons."""
@@ -75,14 +69,14 @@ class IntentScorer:
         if classification != "BUYER":
             reasons.append(f"Classified as {classification}")
             
-        if classification == "UNCLEAR" and score < 0.6:
-            reasons.append(f"Score {score} below rescue threshold 0.6")
+        if classification == "UNCLEAR" and score < INTENT_THRESHOLD:
+            reasons.append(f"Score {score} below rescue threshold {INTENT_THRESHOLD}")
             
         if classification == "SELLER":
-            reasons.append("Hard rejection for SELLER intent")
+            reasons.append("Soft Flagged for SELLER intent (Low Confidence)")
             
         return {
-            "valid": (classification == "BUYER") or (classification == "UNCLEAR" and score >= 0.6),
+            "valid": True, # Always valid for ingestion (soft flagging)
             "score": score,
             "reasons": reasons,
             "classification": classification

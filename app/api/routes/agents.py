@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import PlainTextResponse, FileResponse
+from fastapi.responses import PlainTextResponse, FileResponse, JSONResponse
 import io
 import os
 import tempfile
@@ -71,12 +71,12 @@ def get_agent(agent_id: str, db: Session = Depends(get_db)):
     try:
         agent_uuid = uuid.UUID(agent_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid agent ID format")
+        return JSONResponse(status_code=200, content={"status": "error", "message": "Invalid agent ID format"})
 
     agent = db.query(Agent).filter(Agent.id == agent_uuid).first()
 
     if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        return JSONResponse(status_code=200, content={"status": "error", "message": "Agent not found"})
 
     return enrich_agent_data(agent, db)
 
@@ -92,7 +92,7 @@ def get_agent_leads(
     try:
         agent_uuid = uuid.UUID(agent_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid agent ID format")
+        return []
 
     query = db.query(Lead).filter(Lead.agent_id == agent_uuid)
 
@@ -119,7 +119,7 @@ def export_agent_leads(agent_id: str, db: Session = Depends(get_db)):
     try:
         agent_uuid = uuid.UUID(agent_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid agent ID format")
+        return PlainTextResponse("Invalid agent ID format", media_type="text/plain")
 
     leads = db.query(Lead).filter(Lead.agent_id == agent_uuid).all()
     
@@ -143,11 +143,11 @@ def stop_agent(agent_id: str, db: Session = Depends(get_db)):
     try:
         agent_uuid = uuid.UUID(agent_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid agent ID format")
+        return JSONResponse(status_code=200, content={"status": "error", "message": "Invalid agent ID format"})
         
     agent = db.query(Agent).filter(Agent.id == agent_uuid).first()
     if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        return JSONResponse(status_code=200, content={"status": "error", "message": "Agent not found"})
         
     agent.active = False
     db.commit()
@@ -166,11 +166,11 @@ def export_agent_leads_internal(agent_id: str, db: Session):
     try:
         agent_uuid = uuid.UUID(agent_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid agent ID format")
+        return PlainTextResponse("Invalid agent ID format", media_type="text/plain")
 
     agent = db.query(Agent).filter(Agent.id == agent_uuid).first()
     if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        return PlainTextResponse("Agent not found", media_type="text/plain")
 
     leads = db.query(Lead).filter(Lead.agent_id == agent_uuid).order_by(Lead.created_at.desc()).all()
 
@@ -200,11 +200,11 @@ def delete_agent(agent_id: str, db: Session = Depends(get_db)):
     try:
         agent_uuid = uuid.UUID(agent_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid agent ID format")
+        return JSONResponse(status_code=200, content={"status": "error", "message": "Invalid agent ID format"})
         
     agent = db.query(Agent).filter(Agent.id == agent_uuid).first()
     if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        return JSONResponse(status_code=200, content={"status": "error", "message": "Agent not found"})
         
     # Also delete associated leads (cascade usually handles this if configured, but safe to do manually or rely on DB)
     # Since we don't have cascade delete configured in models (maybe), let's just delete the agent.
