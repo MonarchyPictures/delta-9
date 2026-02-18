@@ -2,7 +2,7 @@
  * 3. API CONFIGURATION (NO LOCALHOST IN PROD)
  * Environment-based configuration with fail-loud behavior.
  */
-const API_URL = import.meta.env.VITE_API_URL || "https://your-live-domain.com";
+const API_URL = import.meta.env.VITE_API_URL || "";
 
 export const getApiUrl = () => {
     return API_URL;

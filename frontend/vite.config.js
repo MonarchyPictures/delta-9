@@ -17,5 +17,19 @@ export default defineConfig({
         proxyTimeout: 120000,
       }
     }
+  },
+  preview: {
+    port: 4173,
+    host: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8001',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, '')
+      },
+      '/leads': 'http://localhost:8001',
+      '/notifications': 'http://localhost:8001',
+      '/agents': 'http://localhost:8001'
+    }
   }
 })

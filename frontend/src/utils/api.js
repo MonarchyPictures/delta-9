@@ -1,5 +1,5 @@
 // Config via Vite env vars
-export const API_URL = "https://your-live-domain.com";
+export const API_URL = import.meta.env.VITE_API_URL || "";
 export const API_KEY = import.meta.env.VITE_API_KEY || "d9_prod_secret_key_2024";
 export const GOOGLE_CSE_ID = "f32db13486dc14c26";
 
