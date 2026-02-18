@@ -7,239 +7,8 @@ import uuid
 import hashlib
 from app.db.base_class import Base
 
-class ContactStatus(enum.Enum):
-    NOT_CONTACTED = "not_contacted"
-    CONTACTED = "contacted"
-    CONVERTED = "converted"
-    REJECTED = "rejected"
-
-class CRMStatus(enum.Enum):
-    NEW = "NEW"
-    CONTACTED = "CONTACTED"
-    REPLIED = "REPLIED"
-    NEGOTIATING = "NEGOTIATING"
-    CONVERTED = "CONVERTED"
-    DEAD = "DEAD"
-
-class Lead(Base):
-    __tablename__ = "leads"
-    
-    # Lead Identification & Metadata
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4) # Maps to lead_id
-    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True, index=True)
-    query = Column(String, nullable=True)
-    location = Column(String, nullable=True)
-    buyer_name = Column(String, index=True)
-    contact_phone = Column(String, index=True) # Maps to phone
-    contact_email = Column(String, index=True) # NEW: Email support
-    product_category = Column(String, index=True) # Maps to product
-    quantity_requirement = Column(String) # Maps to quantity
-    intent_score = Column(Float, index=True) # Maps to intent_strength
-    location_raw = Column(String) # Maps to location
-    radius_km = Column(Float, default=0.0) # Maps to distance_km
-    source_platform = Column(String, index=True) # Maps to source
-    request_timestamp = Column(DateTime, index=True) # Maps to timestamp
-    
-    # NEW: WhatsApp Integration
-    whatsapp_link = Column(String)
-    contact_method = Column(String) # NEW: Explicit contact method from scraper
-    
-    # NEW: Status & Proof of Life (PROD STRICT)
-    status = Column(Enum(CRMStatus), default=CRMStatus.NEW, index=True)
-    source_url = Column(String)
-    http_status = Column(Integer)
-    latency_ms = Column(Integer)
-    
-    # Standardized Buyer Fields
-    is_hot_lead = Column(Integer, default=0, index=True)
-    buyer_request_snippet = Column(String)
-    urgency_level = Column(String, default="low", index=True) # NEW: High/Medium/Low
-    confidence_score = Column(Float, default=0.0, index=True)
-    price = Column(Float, nullable=True) # Extracted price if available
-    is_saved = Column(Integer, default=0)
-    is_verified_signal = Column(Integer, default=1, index=True) # PROD_STRICT: Signal verification flag
-    verification_flag = Column(String, default="verified") # unverified | verified
-    notes = Column(String)
-    contact_source = Column(String) # public | inferred | unavailable
-    contact_flag = Column(String, default="ok") # ok | missing_contact
-    budget = Column(String) # e.g. "1.1M" or "800k"
-    buyer_match_score = Column(Float, default=0.0)
-    contact_status = Column(String, default="verified") # verified | needs_outreach
-    property_country = Column(String, default="Kenya")
-    geo_score = Column(Float, default=0.0) # NEW: 0.0 -> 1.0 geographic relevance
-    geo_strength = Column(String, default="low") # NEW: high | medium | low
-    geo_region = Column(String, default="Global") # NEW: Nairobi | Mombasa | etc
-    
-    # 🎯 RANKING ENGINE (Runs After Save)
-    ranked_score = Column(Float, default=0.0, index=True) # Unified priority score
-    rank_score = Column(Float, default=0.0, index=True) # Intelligent Ranking Engine Score
-    
-    # Response Tracking
-    response_count = Column(Integer, default=0)
-    non_response_flag = Column(Integer, default=0)
-    
-    # Hyper-Specific Intent Intelligence
-    readiness_level = Column(String)
-    urgency_score = Column(Float)
-    budget_info = Column(String)
-    product_specs = Column(JSON)
-    deal_probability = Column(Float)
-    intent_type = Column(String)
-    
-    # Smart Matching
-    match_score = Column(Float, default=0.0)
-    compatibility_status = Column(String)
-    match_details = Column(JSON)
-    
-    # Intent Analysis Extensions
-    payment_method_preference = Column(String)
-    
-    # Local Advantage
-    delivery_range_score = Column(Float, default=0.0)
-    neighborhood = Column(String)
-    local_pickup_preference = Column(Integer, default=0)
-    delivery_constraints = Column(String)
-    
-    # Deal Readiness
-    decision_authority = Column(Integer, default=0)
-    prior_research_indicator = Column(Integer, default=0)
-    comparison_indicator = Column(Integer, default=0)
-    upcoming_deadline = Column(DateTime)
-    
-    # Real-Time & Competitive Intelligence
-    availability_status = Column(String)
-    competition_count = Column(Integer)
-    is_unique_request = Column(Integer)
-    optimal_response_window = Column(String)
-    peak_response_time = Column(String)
-    
-    # Contact Verification & Reliability
-    is_contact_verified = Column(Integer, default=0)
-    contact_reliability_score = Column(Float, default=0.0)
-    preferred_contact_method = Column(String)
-    disposable_email_flag = Column(Integer, default=0)
-    contact_metadata = Column(JSON)
-    
-    # Response Tracking System (Extended)
-    average_response_time_mins = Column(Float)
-    conversion_rate = Column(Float, default=0.0)
-    
-    # Comprehensive Lead Intelligence
-    buyer_history = Column(JSON)
-    platform_activity_level = Column(String)
-    past_response_rate = Column(Float, default=0.0)
-    market_price_range = Column(String)
-    seasonal_demand = Column(String)
-    supply_status = Column(String)
-    conversion_signals = Column(JSON)
-    talking_points = Column(JSON)
-    competitive_advantages = Column(JSON)
-    pricing_strategy = Column(String)
-    
-    verification_badges = Column(JSON)
-    is_genuine_buyer = Column(Integer, default=1)
-    last_activity = Column(DateTime)
-
-    tap_count = Column(Integer, default=0) # Track clicks for schema compliance
-    
-    # Deduplication
-    content_hash = Column(String, index=True) # Hash of core content
-
-    __table_args__ = (
-        UniqueConstraint("source_url", name="uix_source_url"),
-        {'extend_existing': True}
-    )
-
-    # Timestamps
-    created_at = Column(DateTime, server_default=func.now(), index=True)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-    @property
-    def title(self):
-        return self.buyer_name
-
-    @property
-    def content(self):
-        return self.buyer_request_snippet
-
-    @property
-    def source(self):
-        return self.source_platform
-
-    @property
-    def url(self):
-        return self.source_url
-
-    @property
-    def confidence(self):
-        return self.confidence_score
-
-    def __init__(self, **kwargs):
-        # Map user-friendly aliases to DB columns
-        if 'title' in kwargs:
-            self.buyer_name = kwargs.pop('title')
-        if 'content' in kwargs:
-            self.buyer_request_snippet = kwargs.pop('content')
-        if 'source' in kwargs:
-            self.source_platform = kwargs.pop('source')
-        if 'url' in kwargs:
-            self.source_url = kwargs.pop('url')
-        if 'confidence' in kwargs:
-            self.confidence_score = kwargs.pop('confidence')
-            
-        # Set remaining kwargs as attributes
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-            
-        # Ensure ID is generated if not provided
-        if not getattr(self, 'id', None):
-             self.id = str(uuid.uuid4())
-
-    def to_dict(self):
-        from ..intelligence.outreach import OutreachEngine
-        from ..utils.outreach import whatsapp_link
-        outreach_engine = OutreachEngine()
-        
-        msg = outreach_engine.generate_message(self)
-        phone = self.contact_phone or self.whatsapp_link
-        
-        # Mandatory Schema (User Requirement)
-        return {
-            "id": self.id,
-            "query": self.product_category,
-            "location": self.location_raw,
-            "source": self.source_platform,
-            "intent_strength": self.intent_score,
-            "intent_label": self.urgency_level or "medium",
-            "confidence": self.confidence_score,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "whatsapp_url": whatsapp_link(phone, msg) if phone else self.whatsapp_link,
-            "tap_count": self.tap_count or 0,
-            
-            # Legacy/Internal fields for frontend components
-            "lead_id": self.id,
-            "buyer_name": self.buyer_name,
-            "product": self.product_category,
-            "phone": self.contact_phone,
-            "whatsapp_link": self.whatsapp_link,
-            "status": self.status.value if hasattr(self.status, 'value') else self.status,
-            "source_url": self.source_url,
-            "buyer_intent_quote": self.buyer_request_snippet,
-            "outreach_suggestion": msg,
-            "is_hot_lead": bool(self.is_hot_lead),
-            "buyer_match_score": self.buyer_match_score or 0.0,
-            "geo_score": self.geo_score or 0.0,
-            "geo_strength": self.geo_strength or "low",
-            "geo_region": self.geo_region or "Global",
-            "ranked_score": self.ranked_score or 0.0,
-            
-            # New Flags for Frontend Visibility
-            "contact_flag": self.contact_flag,
-            "verification_flag": self.verification_flag,
-            "intent_type": self.intent_type,
-            "contact_email": self.contact_email,
-            "is_verified_signal": self.is_verified_signal
-        }
+# Imported definitions
+from app.models.lead import Lead, ContactStatus, CRMStatus
 
 class BuyerLead(Base):
     """
@@ -273,18 +42,12 @@ class AgentRunLog(Base):
     def to_dict(self):
         return {
             "id": self.id,
-            "name": self.name,
-            "platform": self.platform,
-            "intent": self.intent,
-            "location": self.location,
-            "contact": self.contact,
-            "contact_status": self.contact_status,
-            "confidence": self.confidence,
-            "posted_at": self.posted_at.isoformat() if self.posted_at else None,
-            "created_at": self.created_at.isoformat() if self.created_at else None
+            "agent_id": str(self.agent_id),
+            "run_time": self.run_time.isoformat() if self.run_time else None,
+            "leads_found": self.leads_found,
+            "errors": self.errors,
+            "duration_ms": self.duration_ms
         }
-
-
 
 class BuyerIntent(Base):
     __tablename__ = "buyer_intents"
@@ -330,7 +93,7 @@ class ActivityLog(Base):
     
     id = Column(Integer, primary_key=True)
     event_type = Column(String, index=True) # WHATSAPP_TAP, LEAD_DISCOVERED, SEARCH_PERFORMED
-    lead_id = Column(String, ForeignKey("leads.id"), nullable=True)
+    lead_id = Column(UUID(as_uuid=True), ForeignKey("leads.id"), nullable=True)
     session_id = Column(String, index=True, nullable=True) # To group user behavior
     timestamp = Column(DateTime, server_default=func.now(), index=True)
     extra_metadata = Column(JSON, nullable=True) # For additional info like product name, etc.
@@ -344,8 +107,8 @@ class AgentLead(Base):
     __tablename__ = "agent_leads"
     
     id = Column(Integer, primary_key=True)
-    agent_id = Column(String, ForeignKey("agents.id"))
-    lead_id = Column(String, ForeignKey("leads.id"))
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"))
+    lead_id = Column(UUID(as_uuid=True), ForeignKey("leads.id"))
     discovered_at = Column(DateTime, server_default=func.now())
 
 class SystemSetting(Base):

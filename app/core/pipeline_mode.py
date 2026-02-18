@@ -5,10 +5,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 🌍 Pipeline Configuration
-# KEEP ONLY: bootstrap (local + dev), relaxed (recommended prod), strict (future prod)
-PIPELINE_MODE = os.getenv("PIPELINE_MODE", "relaxed").lower()
-if PIPELINE_MODE not in ["bootstrap", "relaxed", "strict"]:
-    PIPELINE_MODE = "relaxed"
+# KEEP ONLY: bootstrap (local + dev), strict (production)
+# Relaxed mode is DEPRECATED for production.
+PIPELINE_MODE = os.getenv("PIPELINE_MODE", "strict").lower()
+if PIPELINE_MODE not in ["bootstrap", "strict"]:
+    # Fallback to strict for safety if unknown
+    PIPELINE_MODE = "strict"
 
 # Single rule: Flexible query-based discovery
 PIPELINE_QUERY = os.getenv("PIPELINE_QUERY", "").lower()

@@ -3,7 +3,7 @@ from sqlalchemy.orm import sessionmaker
 import os
 
 # Use PostgreSQL exclusively for production, fallback to SQLite for local
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./intent_radar.db").strip()
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./intent_radar_v2.db").strip()
 
 if not DATABASE_URL:
     # Should not happen with default, but good safety

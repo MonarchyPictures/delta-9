@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from app.pipeline.dispatcher import run_pipeline 
-from app.config.runtime import PIPELINE_MODE, PROD_RELAXED, PROD_STRICT, INTENT_THRESHOLD, REQUIRE_VERIFICATION
+from app.config.runtime import PIPELINE_MODE, PROD_RELAXED, PROD_STRICT, INTENT_THRESHOLD, REQUIRE_VERIFICATION, ALLOW_MOCK
 from app.intelligence_v2.thresholds import STRICT_PUBLIC
 
 router = APIRouter() 
@@ -12,7 +12,8 @@ def debug_mode():
         "REQUIRE_VERIFICATION": REQUIRE_VERIFICATION, 
         "INTENT_THRESHOLD": INTENT_THRESHOLD, 
         "PIPELINE_MODE": PIPELINE_MODE,
-        "PROD_RELAXED": PROD_RELAXED
+        "PROD_RELAXED": PROD_RELAXED,
+        "ALLOW_MOCK": ALLOW_MOCK
     } 
 
 @router.post("/search") 
@@ -51,7 +52,7 @@ async def search(request: Request, payload: dict, background_tasks: BackgroundTa
 
     # 🎯 DISPLAY LAYER FILTERING (Annotate, Don't Block)
     # We used to filter, now we just annotate for the UI
-    min_score = STRICT_PUBLIC if PROD_STRICT else INTENT_THRESHOLD
+    min_score = INTENT_THRESHOLD
     
     filtered_results = []
     for r in results:

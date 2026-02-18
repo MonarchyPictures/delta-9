@@ -159,6 +159,12 @@ async def run_pipeline(query: str, location: str, headers: Dict[str, Any] = None
 
         final_leads.sort(key=get_weighted_score, reverse=True)
 
+        # 🛑 HARD FAIL: If no real leads found, return empty immediately.
+        # This prevents any downstream fallback to mock/simulation data.
+        if not final_leads:
+            logger.warning(f"PIPELINE: Zero verified leads found for '{query}'. Enforcing Hard Fail (No Mock).")
+            return [], [], {"scraped": 0, "passed": 0, "rejected": 0, "error": "No leads found"}
+
         duration = time.time() - start_time
         logger.info(f"PIPELINE COMPLETE: Found {len(final_leads)} leads for '{query}' in {duration:.2f}s")
         

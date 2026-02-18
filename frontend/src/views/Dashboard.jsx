@@ -227,6 +227,12 @@ const Dashboard = () => {
         const script = document.createElement('script');
         script.src = `https://cse.google.com/cse.js?cx=${GOOGLE_CSE_ID}`;
         script.async = true;
+        
+        script.onerror = (e) => {
+          console.warn("Google CSE failed to load. Ad-blocker or network issue likely.", e);
+          // Optional: Set a state to show a fallback UI or hide the search box
+        };
+
         document.body.appendChild(script);
       } else {
         // If script is already loaded, try to re-render the element

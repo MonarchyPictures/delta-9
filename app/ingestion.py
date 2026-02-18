@@ -14,7 +14,7 @@ from .scrapers.google_scraper import GoogleScraper
 from .scrapers.facebook_marketplace import FacebookMarketplaceScraper
 from .scrapers.duckduckgo import DuckDuckGoScraper
 from .scrapers.serpapi_scraper import SerpApiScraper
-from .scrapers.classifieds import ClassifiedsScraper
+from .scrapers.jiji import ClassifiedsScraper
 from .scrapers.twitter import TwitterScraper
 from .scrapers.google_maps import GoogleMapsScraper
 from .scrapers.reddit import RedditScraper
@@ -91,11 +91,10 @@ def ingest_leads(raw_results: List[Dict[str, Any]]) -> List[Any]:
     return verified_leads
 
 
-from .scrapers.mock_scraper import MockScraper
+# from .scrapers.mock_scraper import MockScraper
 
 # ALL possible scrapers available in the system
 ALL_SCRAPERS = [ 
-    MockScraper(),
     GoogleMapsScraper(), 
     ClassifiedsScraper(), 
     FacebookMarketplaceScraper(), 
@@ -113,7 +112,6 @@ logger = get_logger("Ingestion")
 
 # ⚡ TIER 1: FAST (API / Lightweight) - 5 sec max return
 TIER_1_SCRAPERS = [
-    "MockScraper",
     "GoogleCSEScraper", 
     "DuckDuckGoScraper", 
     "RedditScraper" # Usually fast via DDG site search
@@ -390,11 +388,11 @@ class LiveLeadIngestor:
         logger.info(f"AI Decision (Ranked): {[(s.__class__.__name__, round(s.priority_score, 2)) for s in active_scrapers]}")
 
         # Check specifically for MockScraper
-        mock_in_active = any(isinstance(s, MockScraper) for s in active_scrapers)
-        if mock_in_active:
-            logger.info("CONFIRMED: MockScraper is in active_scrapers list.")
-        else:
-            logger.warning("WARNING: MockScraper is NOT in active_scrapers list.")
+        # mock_in_active = any(isinstance(s, MockScraper) for s in active_scrapers)
+        # if mock_in_active:
+        #     logger.info("CONFIRMED: MockScraper is in active_scrapers list.")
+        # else:
+        #     logger.warning("WARNING: MockScraper is NOT in active_scrapers list.")
 
         discovery_templates = [
             # Pass 1: Direct buyer intent

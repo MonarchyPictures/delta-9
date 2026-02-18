@@ -36,7 +36,8 @@ BUSINESS_URL_INDICATORS = [
 
 TRUSTED_SOURCES = { 
     "google_maps", 
-    "classifieds", 
+    "classifieds",
+    "jiji",
     "facebook_marketplace",
     "GoogleMapsScraper",
     "ClassifiedsScraper",

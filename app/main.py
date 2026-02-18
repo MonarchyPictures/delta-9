@@ -40,6 +40,7 @@ from .routes.pipeline import router as pipeline_router
 from .routes.outreach import router as outreach_router
 from .api.routes import agents as agents_router
 from .api.routes import notifications as notifications_router
+from .api.routes.core import router as core_router
 
 from .intelligence.buyer_profile import BuyerProfile, BuyerBehaviorEngine
 
@@ -99,12 +100,15 @@ app.add_middleware(RateLimitMiddleware)
 # Add CORS Middleware with strict validation
 # In strict production mode, we default to NO origins if not specified.
 # In dev/bootstrap, we allow localhost.
+allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "http://localhost:5174,http://127.0.0.1:5174")
+allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",")]
+
+if os.getenv("ENV") == "production" and "*" in allowed_origins:
+     logger.warning("PRODUCTION WARNING: CORS allows all origins (*).")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -119,6 +123,7 @@ app.include_router(pipeline_router)
 app.include_router(outreach_router)
 app.include_router(agents_router.router, prefix="/agents", tags=["agents"])
 app.include_router(notifications_router.router, prefix="/notifications", tags=["notifications"])
+app.include_router(core_router, prefix="/api", tags=["core"])
 
 @app.get("/health")
 async def health_check():

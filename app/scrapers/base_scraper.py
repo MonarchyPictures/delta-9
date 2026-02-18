@@ -65,6 +65,38 @@ class BaseScraper(ABC):
         """ 
         pass 
 
+    async def search(self, query: str, location: str) -> List[Dict[str, Any]]:
+        """
+        New Standard Interface for Search Service.
+        Wraps the legacy 'scrape' method and ensures async execution.
+        """
+        import asyncio
+        from datetime import datetime, timezone
+
+        # Check if scrape is async
+        if asyncio.iscoroutinefunction(self.scrape):
+            # For async scrapers, we can pass query/location directly if they support it 
+            # (like Jiji which overrides search)
+            # But BaseScraper implementation is a fallback for legacy scrapers
+            # Legacy scrapers use 'scrape(query, time_window)'
+            full_query = f"{query} {location}"
+            signals = await self.scrape(full_query, time_window_hours=24)
+        else:
+            full_query = f"{query} {location}"
+            signals = await asyncio.to_thread(self.scrape, full_query, time_window_hours=24)
+            
+        results = []
+        for s in signals:
+            results.append({
+                "title": s.get("title") or s.get("text") or s.get("snippet") or "Unknown Result",
+                "url": s.get("url"),
+                "source": s.get("source"),
+                "snippet": s.get("text") or s.get("snippet"),
+                "location": s.get("location", location),
+                "timestamp": s.get("timestamp", datetime.now(timezone.utc).isoformat())
+            })
+        return results 
+
     def get_page_content(self, url, wait_selector=None): 
         print("Navigating to:", url)
         logger.info(f"PLAYWRIGHT: Fetching {url} with hardened stealth")

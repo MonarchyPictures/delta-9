@@ -7,7 +7,7 @@ from app.scrapers import (
     GoogleScraper, FacebookMarketplaceScraper, DuckDuckGoScraper,
     SerpApiScraper, GoogleCSEScraper, ClassifiedsScraper,
     TwitterScraper, InstagramScraper, GoogleMapsScraper,
-    WhatsAppPublicGroupScraper, RedditScraper, MockScraper
+    WhatsAppPublicGroupScraper, RedditScraper
 )
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,6 @@ SCRAPER_CLASSES = {
     "GoogleMapsScraper": GoogleMapsScraper,
     "WhatsAppPublicGroupScraper": WhatsAppPublicGroupScraper,
     "RedditScraper": RedditScraper,
-    "MockScraper": MockScraper,
 }
 
 async def run_scrapers(query: str, location: str = "Kenya") -> List[Dict[str, Any]]:
@@ -41,19 +40,19 @@ async def run_scrapers(query: str, location: str = "Kenya") -> List[Dict[str, An
     full_query = f"{query} {search_location}"
     logger.info(f"🚀 [RUNNER] Starting scrapers for: {full_query}")
 
-    active_scraper_names = get_active_scrapers()
-    logger.info(f"ℹ️ [RUNNER] Active scrapers: {active_scraper_names}")
+    active_scrapers = get_active_scrapers()
+    # Log active scrapers
+    # Use source or class name for logging
+    active_names = [getattr(s, "source", s.__class__.__name__) for s in active_scrapers]
+    logger.info(f"ℹ️ [RUNNER] Active scrapers: {active_names}")
     results = []
     
     # Run scrapers concurrently
     tasks = []
-    for name in active_scraper_names:
-        scraper_cls = SCRAPER_CLASSES.get(name)
-        if not scraper_cls:
-            logger.warning(f"⚠️ [RUNNER] Scraper class not found for: {name}")
-            continue
-            
-        tasks.append(run_single_scraper(scraper_cls, name, full_query))
+    for scraper in active_scrapers:
+        # Pass scraper instance directly
+        name = getattr(scraper, "source", scraper.__class__.__name__)
+        tasks.append(run_single_scraper(scraper, name, full_query))
 
     if not tasks:
         logger.warning("No active scrapers found.")
@@ -71,37 +70,31 @@ async def run_scrapers(query: str, location: str = "Kenya") -> List[Dict[str, An
     logger.info(f"🏁 [RUNNER] All scrapers finished. Total raw results: {len(results)}")
     return results
 
-async def run_single_scraper(scraper_cls, name: str, query: str) -> List[Dict[str, Any]]:
+from app.scrapers.runner_helpers import _normalize_results
+
+async def run_single_scraper(scraper, name: str, query: str) -> List[Dict[str, Any]]:
     """
-    Runs a single scraper in a thread to avoid blocking the event loop.
+    Runs a single scraper. Supports both async and sync implementations.
     """
     try:
-        # Wrap blocking scrape call in thread
-        return await asyncio.to_thread(_execute_scrape_sync, scraper_cls, name, query)
+        if asyncio.iscoroutinefunction(scraper.scrape):
+            # Run async scraper directly
+            logger.info(f"▶️ [RUNNER] Running {name} (Async)...")
+            signals = await scraper.scrape(query, time_window_hours=24)
+        else:
+            # Wrap blocking sync scrape call in thread
+            signals = await asyncio.to_thread(_execute_scrape_sync, scraper, name, query)
+            
+        # Normalize results (shared logic)
+        return _normalize_results(signals, name)
     except Exception as e:
         logger.error(f"❌ [RUNNER] {name} failed: {e}")
         return []
 
-def _execute_scrape_sync(scraper_cls, name: str, query: str) -> List[Dict[str, Any]]:
+def _execute_scrape_sync(scraper, name: str, query: str) -> List[Dict[str, Any]]:
     """
     Synchronous execution wrapper for the scraper.
     """
-    logger.info(f"▶️ [RUNNER] Running {name}...")
-    scraper = scraper_cls()
-    signals = scraper.scrape(query, time_window_hours=24)
-    
-    normalized_results = []
-    for signal in signals:
-        normalized_results.append({
-            "title": signal.get("author") or "Unknown Source",
-            "snippet": signal.get("text") or signal.get("snippet", ""),
-            "source": signal.get("source", name),
-            "url": signal.get("url"),
-            "phone": signal.get("phone"),
-            "location": signal.get("location"),
-            "timestamp": signal.get("timestamp"),
-            "confidence": 0.0
-        })
-    
-    logger.info(f"✅ [RUNNER] {name} returned {len(normalized_results)} results")
-    return normalized_results
+    logger.info(f"▶️ [RUNNER] Running {name} (Sync)...")
+    # Scraper is already instantiated
+    return scraper.scrape(query, time_window_hours=24)
