@@ -2,6 +2,7 @@
 fastapi
 uvicorn[standard]
 pydantic[email]
+pydantic-settings
 python-dotenv
 
 # Database
@@ -12,6 +13,7 @@ redis
 celery
 
 # Scraping & Automation
+httpx
 requests
 beautifulsoup4
 playwright

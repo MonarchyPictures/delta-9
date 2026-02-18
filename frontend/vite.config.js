@@ -23,13 +23,14 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8001',
+        target: 'http://127.0.0.1:8001',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, '')
       },
-      '/leads': 'http://localhost:8001',
-      '/notifications': 'http://localhost:8001',
-      '/agents': 'http://localhost:8001'
+      '/leads': 'http://127.0.0.1:8001',
+      '/notifications': 'http://127.0.0.1:8001',
+      '/agents': 'http://127.0.0.1:8001',
+      '/success': 'http://127.0.0.1:8001'
     }
   }
 })

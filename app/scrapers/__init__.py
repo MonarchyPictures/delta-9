@@ -2,7 +2,7 @@ from .base_scraper import BaseScraper
 from .google_scraper import GoogleScraper
 from .facebook_marketplace import FacebookMarketplaceScraper
 from .duckduckgo import DuckDuckGoScraper
-from .serpapi_scraper import SerpApiScraper
+from .serpapi_scraper import SerpAPIScraper
 from .google_cse import GoogleCSEScraper
 from .jiji import ClassifiedsScraper
 from .twitter import TwitterScraper
@@ -17,7 +17,7 @@ __all__ = [
     "GoogleScraper",
     "FacebookMarketplaceScraper",
     "DuckDuckGoScraper",
-    "SerpApiScraper",
+    "SerpAPIScraper",
     "GoogleCSEScraper",
     "ClassifiedsScraper",
     "TwitterScraper",

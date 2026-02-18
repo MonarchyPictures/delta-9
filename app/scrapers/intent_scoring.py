@@ -29,7 +29,7 @@ def score_intent(title: str) -> float:
         if word in title_lower:
             score += 0.2
 
-    if "buy" in title_lower or "looking" in title_lower:
+    if any(keyword in title_lower for keyword in ["buy", "looking", "need", "wtb", "seeking"]):
         score += 0.2
 
     return min(score, 1.0)

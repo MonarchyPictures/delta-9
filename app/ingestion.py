@@ -13,7 +13,7 @@ from .scrapers.base_scraper import BaseScraper
 from .scrapers.google_scraper import GoogleScraper
 from .scrapers.facebook_marketplace import FacebookMarketplaceScraper
 from .scrapers.duckduckgo import DuckDuckGoScraper
-from .scrapers.serpapi_scraper import SerpApiScraper
+from .scrapers.serpapi_scraper import SerpAPIScraper
 from .scrapers.jiji import ClassifiedsScraper
 from .scrapers.twitter import TwitterScraper
 from .scrapers.google_maps import GoogleMapsScraper

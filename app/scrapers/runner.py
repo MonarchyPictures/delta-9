@@ -5,7 +5,7 @@ from typing import List, Dict, Any
 from app.scrapers.registry import get_active_scrapers
 from app.scrapers import (
     GoogleScraper, FacebookMarketplaceScraper, DuckDuckGoScraper,
-    SerpApiScraper, GoogleCSEScraper, ClassifiedsScraper,
+    SerpAPIScraper, GoogleCSEScraper, ClassifiedsScraper,
     TwitterScraper, InstagramScraper, GoogleMapsScraper,
     WhatsAppPublicGroupScraper, RedditScraper
 )
@@ -16,7 +16,7 @@ SCRAPER_CLASSES = {
     "GoogleScraper": GoogleScraper,
     "FacebookMarketplaceScraper": FacebookMarketplaceScraper,
     "DuckDuckGoScraper": DuckDuckGoScraper,
-    "SerpApiScraper": SerpApiScraper,
+    "SerpAPIScraper": SerpAPIScraper,
     "GoogleCSEScraper": GoogleCSEScraper,
     "ClassifiedsScraper": ClassifiedsScraper,
     "TwitterScraper": TwitterScraper,

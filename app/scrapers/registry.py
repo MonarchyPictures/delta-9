@@ -21,12 +21,14 @@ def get_active_scrapers():
 from .jiji import ClassifiedsScraper 
 from .google_maps import GoogleMapsScraper
 from .duckduckgo import DuckDuckGoScraper
+from .serpapi_scraper import SerpAPIScraper
 # from .reddit import RedditScraper
 
 # Core Scrapers
 register_scraper("jiji", ClassifiedsScraper()) 
 register_scraper("google_maps", GoogleMapsScraper())
 register_scraper("duckduckgo", DuckDuckGoScraper())
+register_scraper("serpapi", SerpAPIScraper())
 
 # Optional Scrapers (disabled by default in this new registry logic unless registered)
 # To match previous state where Reddit was disabled, I won't register it or I will register then disable.

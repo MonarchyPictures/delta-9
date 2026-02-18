@@ -68,7 +68,7 @@ export const fetchLeadsMeta = async (limit = 10) => {
 
 export const fetchNotifications = async () => {
     try {
-        const response = await fetchWithRetry(`${API_URL}/notifications`, {
+        const response = await fetchWithRetry(`${API_URL}/notifications/`, {
             method: "GET",
             headers
         });
@@ -108,7 +108,7 @@ export const markNotificationAsRead = async (id) => {
 
 export const clearAllNotifications = async () => {
     try {
-        await fetch(`${API_URL}/notifications`, {
+        await fetch(`${API_URL}/notifications/`, {
             method: "DELETE",
             headers
         });
@@ -121,7 +121,7 @@ export const clearAllNotifications = async () => {
 
 export const fetchAgents = async () => {
     try {
-        const response = await fetchWithRetry(`${API_URL}/agents`, {
+        const response = await fetchWithRetry(`${API_URL}/agents/`, {
             method: "GET",
             headers
         });
@@ -135,7 +135,7 @@ export const fetchAgents = async () => {
 
 export const createAgent = async (agentData) => {
     try {
-        const response = await fetch(`${API_URL}/agents`, {
+        const response = await fetchWithRetry(`${API_URL}/agents/`, {
             method: "POST",
             headers,
             body: JSON.stringify(agentData)
