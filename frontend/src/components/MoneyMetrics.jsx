@@ -73,7 +73,7 @@ const MoneyMetrics = ({ onMetricClick }) => {
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-10">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-10">
       {metrics.map((m, i) => (
         <motion.div
           key={m.label}
@@ -94,7 +94,9 @@ const MoneyMetrics = ({ onMetricClick }) => {
             <span className="text-2xl">{m.icon}</span>
             <div className={`h-1.5 w-1.5 rounded-full ${m.color.replace('text', 'bg')} animate-pulse`}></div>
           </div>
-          <span className="text-3xl font-black text-white mb-1 tabular-nums">{m.value}</span>
+          <div className="flex items-baseline gap-1">
+            <span className="text-xl md:text-3xl font-black text-white mb-1 tabular-nums">{m.value}</span>
+          </div>
           <span className="text-[9px] font-black text-white/30 uppercase tracking-[0.2em] leading-tight group-hover:text-white/60 transition-colors">
             {m.label}
           </span>

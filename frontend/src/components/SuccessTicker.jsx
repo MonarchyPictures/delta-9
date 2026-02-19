@@ -41,7 +41,7 @@ const SuccessTicker = ({ onMetricClick }) => {
   if (!stats) return null;
 
   return (
-    <div className="w-full bg-blue-600/10 border-y border-blue-500/20 py-2 px-4 flex items-center justify-center gap-8 overflow-hidden whitespace-nowrap">
+    <div className="w-full bg-blue-600/10 border-y border-blue-500/20 py-2 px-4 flex flex-wrap md:flex-nowrap items-center justify-center gap-4 md:gap-8 overflow-hidden">
       <div className="flex items-center gap-2">
         <Activity size={14} className="text-blue-500 animate-pulse" />
         <span className="text-[10px] font-black text-white/60 uppercase tracking-widest">

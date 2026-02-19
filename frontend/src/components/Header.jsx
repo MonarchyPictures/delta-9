@@ -52,7 +52,7 @@ const Header = () => {
     <header className="h-16 bg-black/50 backdrop-blur-md border-b border-white/10 z-[100] px-4 md:px-8">
       <div className="max-w-7xl mx-auto h-full flex items-center justify-between relative">
         {/* Branding/Section Title */}
-        <div className="flex items-center gap-4">
+        <div className="flex flex-col md:flex-row items-center gap-3">
           <div className="md:hidden flex items-center gap-2" onClick={() => navigate('/')}>
              <h1 className="text-xl font-black italic tracking-tighter cursor-pointer">D<span className="text-blue-600">9</span></h1>
           </div>

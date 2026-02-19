@@ -140,7 +140,7 @@ const LeadDetail = ({ lead, onClose, onSave, onDelete, onUpdate }) => {
             </div>
 
             {/* Quick Actions */}
-            <div className="flex gap-3">
+            <div className="flex flex-col md:flex-row gap-3">
               <button 
                 onClick={() => onSave(lead.id)}
                 className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition-all border ${lead.is_saved ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'}`}
@@ -160,9 +160,9 @@ const LeadDetail = ({ lead, onClose, onSave, onDelete, onUpdate }) => {
             </div>
           </div>
 
-          {/* Right Side: CRM & Messaging */}
+          {/* Right Side - CRM & Actions */}
           <div className="w-full md:w-80 overflow-y-auto p-6 bg-white/[0.02] flex flex-col gap-6">
-            <div>
+            <div className="flex items-center justify-between">
               <h3 className="text-white/40 text-xs font-bold uppercase tracking-widest mb-3">Status Management</h3>
               <select 
                 value={status}

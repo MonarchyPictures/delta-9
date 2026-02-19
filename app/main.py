@@ -115,14 +115,14 @@ app.add_middleware(
 )
 
 # Register routers
-app.include_router(leads_router)
-app.include_router(search_router)
-app.include_router(scrapers_router)
-app.include_router(admin_router)
-app.include_router(pipeline_router)
-app.include_router(outreach_router)
-app.include_router(agents_router.router, prefix="/agents", tags=["agents"])
-app.include_router(notifications_router.router, prefix="/notifications", tags=["notifications"])
+app.include_router(leads_router, prefix="/api/leads", tags=["leads"])
+app.include_router(search_router, prefix="/api", tags=["search"])
+app.include_router(scrapers_router, prefix="/api/scrapers", tags=["scrapers"])
+app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
+app.include_router(pipeline_router, prefix="/api/pipeline", tags=["pipeline"])
+app.include_router(outreach_router, prefix="/api/outreach", tags=["outreach"])
+app.include_router(agents_router.router, prefix="/api/agents", tags=["agents"])
+app.include_router(notifications_router.router, prefix="/api/notifications", tags=["notifications"])
 app.include_router(core_router, prefix="/api", tags=["core"])
 
 @app.get("/health")
@@ -344,7 +344,7 @@ if os.path.exists(dist_path):
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         # Skip if path is an API endpoint
-        if full_path.startswith("api/") or full_path.startswith("notifications") or full_path.startswith("leads") or full_path.startswith("agents") or full_path.startswith("search") or full_path.startswith("success"):
+        if full_path.startswith("api/"):
             raise HTTPException(status_code=404)
             
         file_path = os.path.join(dist_path, full_path)

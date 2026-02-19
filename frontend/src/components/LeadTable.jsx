@@ -83,7 +83,7 @@ const LeadTable = ({ leads, selected = [], setSelected, onStatusChange, onTap })
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-white">{lead.buyer_name || lead.source_name || "Verified Buyer"}</span>
-                        <div className="flex gap-1">
+                        <div className="flex flex-wrap items-center gap-2">
                           {isHighIntent && <span title="High intent" className="text-[10px]">🔥</span>}
                           {hasWhatsApp && <span title="WhatsApp active" className="text-[10px]">💬</span>}
                           {isRecent && <span title="Recent activity" className="text-[10px]">⏱</span>}

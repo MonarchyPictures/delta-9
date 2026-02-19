@@ -80,7 +80,7 @@ const AgentManager = () => {
 
   return (
     <div className="p-4 bg-gray-900 text-white rounded-lg shadow-xl">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6 text-center md:text-left">
         <h2 className="text-2xl font-bold text-blue-400">🕵️ 24/7 Demand Radar Agents</h2>
         <button 
           onClick={() => setShowCreate(!showCreate)}
@@ -173,7 +173,7 @@ const AgentManager = () => {
             agents.map(agent => (
               <div key={agent.id} className="bg-gray-800 p-5 rounded-lg border border-gray-700 shadow-lg">
                 {/* Header */}
-                <div className="flex justify-between items-start mb-4">
+                <div className="flex flex-col md:flex-row justify-between items-start gap-4 mb-4">
                     <div>
                         <h3 className="text-xl font-bold text-white flex items-center gap-2">
                             {agent.name}
@@ -208,7 +208,7 @@ const AgentManager = () => {
                 </div>
                 
                 {/* Actions */}
-                <div className="flex justify-between items-center border-t border-gray-700 pt-4">
+                <div className="flex flex-col md:flex-row justify-between items-center border-t border-gray-700 pt-4 gap-4">
                   <div className="text-xs text-gray-500">
                     Runs every {agent.interval_hours}h for {agent.duration_days} days
                   </div>

@@ -5,13 +5,13 @@ import { Radar } from 'lucide-react';
 const Agents = () => {
   return (
     <div className="flex-1 bg-black overflow-y-auto pt-20 pb-24">
-      <div className="max-w-4xl mx-auto px-4">
-        <div className="flex items-center gap-3 mb-8">
+      <div className="max-w-4xl mx-auto px-4 md:px-8">
+        <div className="flex flex-col md:flex-row items-center md:items-start gap-3 mb-8 text-center md:text-left">
           <div className="p-3 bg-blue-600/20 rounded-2xl">
             <Radar className="h-8 w-8 text-blue-500" />
           </div>
           <div>
-            <h1 className="text-3xl font-black text-white tracking-tight uppercase italic">
+            <h1 className="text-xl md:text-3xl font-black text-white tracking-tight uppercase italic">
               Demand <span className="text-blue-600">Radar</span>
             </h1>
             <p className="text-white/40 text-[10px] font-black uppercase tracking-[0.3em]">
@@ -24,7 +24,7 @@ const Agents = () => {
           <AgentManager />
         </div>
 
-        <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <div className="bg-white/5 p-6 rounded-3xl border border-white/5">
             <h3 className="text-blue-400 font-bold mb-2 flex items-center gap-2">
               <span className="text-lg">🕒</span> Always On

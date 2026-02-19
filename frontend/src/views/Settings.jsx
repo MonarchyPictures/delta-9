@@ -73,12 +73,12 @@ const Settings = () => {
     <div className="flex-1 overflow-y-auto bg-black p-4 md:p-8">
       <div className="max-w-4xl mx-auto space-y-8">
         {/* Header */}
-        <div className="flex items-center gap-4">
+        <div className="flex flex-col md:flex-row items-center gap-4 text-center md:text-left">
           <div className="p-3 bg-blue-600/20 rounded-2xl">
             <SettingsIcon className="text-blue-500" size={32} />
           </div>
           <div>
-            <h2 className="text-3xl font-black italic tracking-tighter uppercase">Settings</h2>
+            <h2 className="text-xl md:text-3xl font-black italic tracking-tighter uppercase">Settings</h2>
             <p className="text-white/40 text-sm font-bold tracking-widest uppercase">System Configuration • Kenya Vehicles</p>
           </div>
         </div>
@@ -92,7 +92,7 @@ const Settings = () => {
 
         {/* Scrapers Section */}
         <section className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <Zap className="text-yellow-500" size={20} />
               <h3 className="text-lg font-black uppercase tracking-widest italic">Signal Scrapers</h3>

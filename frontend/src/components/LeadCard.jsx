@@ -183,7 +183,7 @@ const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange, onTap }) =>
     >
       <div className="relative z-10">
         {/* Header - Tags + Time */}
-        <div className="flex justify-between items-start mb-6">
+        <div className="flex flex-col md:flex-row justify-between items-start gap-2 mb-6">
           <div className="flex flex-wrap gap-2">
             {isHighIntent && (
               <span className="px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest border border-red-500/30 bg-red-500/10 text-red-500 flex items-center gap-1">
@@ -251,7 +251,7 @@ const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange, onTap }) =>
         </div>
 
         {/* Location + Source */}
-        <div className="flex items-center gap-4 mb-6">
+        <div className="flex flex-wrap items-center gap-4 mb-6">
           <div className="flex items-center gap-1.5 text-white/60 text-xs font-bold">
             <MapPin size={14} className="text-blue-500" />
             <span>{lead.location || lead.location_raw || 'Kenya'}</span>
@@ -291,7 +291,7 @@ const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange, onTap }) =>
         )}
 
         {/* Primary Actions - TAP + COPY */}
-        <div className="flex gap-3">
+        <div className="flex flex-col md:flex-row gap-3">
           {hasWhatsApp ? (
             <button
               onClick={handleContact}

@@ -1,0 +1,5 @@
+[33mcommit f70fca532b7dfaca68a98e79af7e389b8a0332e4[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: tkiigi <138964865+tkiigi@users.noreply.github.com>
+Date:   Wed Feb 18 23:25:33 2026 -0500
+
+    Fix_backend_startup_and_schema

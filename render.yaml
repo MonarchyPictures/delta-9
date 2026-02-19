@@ -22,14 +22,17 @@ services:
         generateValue: true
 
   # Frontend Service (React/Vite)
-  - type: web
+  - type: static
     name: delta9-frontend
-    env: static
+    repo: https://github.com/your-repo/delta-9 # Render usually infers this, but good to know
     buildCommand: cd frontend && npm install && npm run build
-    staticPublishPath: frontend/dist
+    staticPublishPath: ./frontend/dist
     envVars:
       - key: VITE_API_URL
-        value: https://delta9-backend.onrender.com # Update with actual backend URL if different
+        fromService:
+          type: web
+          name: delta9-backend
+          property: url
     routes:
       - type: rewrite
         source: /*

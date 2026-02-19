@@ -59,7 +59,7 @@ const SummaryCards = ({ stats = {} }) => {
       variants={container}
       initial="hidden"
       animate="show"
-      className="grid grid-cols-1 md:grid-cols-3 gap-6"
+      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
     >
       {cards.map((card, i) => {
         const Icon = card.icon;
@@ -87,7 +87,7 @@ const SummaryCards = ({ stats = {} }) => {
             
             <div className="space-y-1">
               <p className="text-gray-400 text-[10px] font-bold uppercase tracking-widest">{card.label}</p>
-              <h2 className="text-3xl font-bold text-gray-900 tracking-tight">{card.value}</h2>
+              <h2 className="text-xl md:text-3xl font-bold text-gray-900 tracking-tight">{card.value}</h2>
             </div>
             
             <div className="flex items-center gap-2 mt-6 pt-4 border-t border-gray-50">

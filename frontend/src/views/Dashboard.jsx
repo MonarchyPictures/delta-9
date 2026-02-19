@@ -282,7 +282,7 @@ const Dashboard = () => {
         setActiveFilter(filter);
         setIsDrawerOpen(true);
       }} />
-      <div className="w-full max-w-4xl mx-auto px-4 mb-8">
+      <div className="w-full max-w-4xl mx-auto px-4 md:px-8 mb-8">
         {!hasSearched && (
           <div className="text-center mb-12">
             <h1 className="text-5xl font-black text-white tracking-tighter italic mb-4 uppercase">
@@ -333,7 +333,7 @@ const Dashboard = () => {
             animate={{ opacity: 1, scale: 1 }}
             className="mt-8 mb-8"
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {leads.slice(0, 4).map((lead, index) => {
                 const timestamp = lead.timestamp || lead.request_timestamp || lead.created_at;
                 const isRecent = timestamp && (new Date() - new Date(timestamp)) < 24 * 60 * 60 * 1000;

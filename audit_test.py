@@ -3,8 +3,8 @@ import requests
 import json
 import time
 
-BASE_URL = "http://localhost:8001"
-SEARCH_ENDPOINT = f"{BASE_URL}/search"
+BASE_URL = "http://localhost:8000"
+SEARCH_ENDPOINT = f"{BASE_URL}/api/search"
 
 QUERIES = [
     {"query": "laptops Nairobi", "desc": "Scraper Verification"},

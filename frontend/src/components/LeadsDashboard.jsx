@@ -97,17 +97,17 @@ const LeadsDashboard = () => {
   };
 
   return (
-    <div className="p-6 bg-gray-900 min-h-screen text-white">
-      <div className="flex justify-between items-center mb-8">
+    <div className="p-4 md:p-8 bg-gray-900 min-h-screen text-white">
+      <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-8 text-center md:text-left">
         <div>
-          <h1 className="text-3xl font-bold text-blue-400 flex items-center gap-3">
+          <h1 className="text-xl md:text-3xl font-bold text-blue-400 flex flex-col md:flex-row items-center gap-3">
             🎯 Lead Intelligence Dashboard
           </h1>
           <p className="text-gray-400 mt-2">
             Real-time monitoring of agent activities and incoming leads
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap justify-center items-center gap-4">
           <div className="text-sm text-gray-400">
             Last updated: {lastUpdated.toLocaleTimeString()}
           </div>
@@ -158,14 +158,14 @@ const LeadsDashboard = () => {
         {agents.map(agent => (
           <div key={agent.id} className="bg-gray-800 rounded-xl overflow-hidden border border-gray-700">
             <div 
-              className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-750 transition-colors"
+              className="p-4 flex flex-col md:flex-row items-center justify-between cursor-pointer hover:bg-gray-750 transition-colors gap-4"
               onClick={() => toggleAgent(agent.id)}
             >
-              <div className="flex items-center gap-4">
+              <div className="flex flex-col md:flex-row items-center gap-4 text-center md:text-left">
                 {expandedAgentId === agent.id ? <ChevronDown /> : <ChevronRight />}
                 <div>
                   <h3 className="text-xl font-bold text-white">{agent.name}</h3>
-                  <div className="flex items-center gap-4 text-sm text-gray-400 mt-1">
+                  <div className="flex flex-wrap justify-center md:justify-start items-center gap-4 text-sm text-gray-400 mt-1">
                     <span>Query: "{agent.query}"</span>
                     <span>•</span>
                     <span className={agent.active ? "text-green-400" : "text-red-400"}>
@@ -176,8 +176,8 @@ const LeadsDashboard = () => {
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-4">
-                <div className="text-right">
+              <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto justify-center md:justify-end">
+                <div className="text-center md:text-right">
                   <div className="text-2xl font-bold text-blue-400">{agent.leads_count || 0}</div>
                   <div className="text-xs text-gray-500">Total Leads</div>
                 </div>
