@@ -252,24 +252,51 @@ def health_check(db: Session = Depends(get_db)):
         health["database"] = f"error: {str(e)}"
 
     # Check Active Scrapers
-    from .scrapers.registry import get_active_scrapers
-    active = get_active_scrapers()
-    health["active_scrapers"] = len(active)
+    try:
+        from .scrapers.registry import get_active_scrapers
+        active = get_active_scrapers()
+        health["active_scrapers"] = len(active)
+    except Exception as e:
+        health["active_scrapers"] = f"error: {str(e)}"
     
     return health
 
+# Serve React App (SPA Support)
+# We mount the assets folder to /assets
+frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
+assets_dir = os.path.join(frontend_dir, "assets")
+
+if os.path.exists(assets_dir):
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
 @app.get("/")
-def read_root():
-    # Use absolute path to ensure we find the frontend dist
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    index_path = os.path.join(base_dir, "frontend", "dist", "index.html")
-    
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-        
+async def serve_root():
+    """Serve the React app root."""
+    if os.path.exists(frontend_dir):
+        index_path = os.path.join(frontend_dir, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
     return {
         "status": "online",
-        "message": "Delta9 Production API - Generic Market Intelligence Node",
+        "message": "Delta9 Production API - Frontend not built or not found",
+        "version": "1.0.0"
+    }
+
+# Catch-all route for SPA to serve index.html
+@app.get("/{full_path:path}")
+async def serve_react_app(full_path: str):
+    # If API route is not found, return 404 instead of index.html
+    if full_path.startswith("api"):
+        raise HTTPException(status_code=404, detail="Not Found")
+        
+    if os.path.exists(frontend_dir):
+        index_path = os.path.join(frontend_dir, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+            
+    return {
+        "status": "online",
+        "message": "Delta9 Production API - Frontend not built or not found",
         "version": "1.0.0"
     }
 

@@ -21,10 +21,10 @@ scrapy
 scrapy-playwright
 
 # AI/NLP
-spacy
-transformers
-torch
-sentence-transformers
+# transformers  # Heavy, removed for lightweight deployment
+# torch         # Heavy, removed for lightweight deployment
+# sentence-transformers # Heavy, removed for lightweight deployment
+# spacy         # Heavy, removed for lightweight deployment
 
 # Utilities
 geopy
