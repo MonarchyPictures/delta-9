@@ -98,27 +98,6 @@ class ActivityLog(Base):
     timestamp = Column(DateTime, server_default=func.now(), index=True)
     extra_metadata = Column(JSON, nullable=True) # For additional info like product name, etc.
 
-# Import Agent from new location but allow it to be accessed via models.Agent
-from app.models.agent import Agent
-from app.models.agent_raw_lead import AgentRawLead
-from app.models.notification import Notification
-
-class AgentLead(Base):
-    __tablename__ = "agent_leads"
-    
-    id = Column(Integer, primary_key=True)
-    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"))
-    lead_id = Column(UUID(as_uuid=True), ForeignKey("leads.id"))
-    discovered_at = Column(DateTime, server_default=func.now())
-
-class SystemSetting(Base):
-    __tablename__ = "system_settings"
-    
-    id = Column(Integer, primary_key=True)
-    key = Column(String, unique=True, index=True)
-    value = Column(JSON)
-    updated_at = Column(DateTime, onupdate=func.now())
-
 class ScraperMetric(Base):
     __tablename__ = "scraper_metrics"
     
@@ -129,13 +108,6 @@ class ScraperMetric(Base):
     verified_leads = Column(Integer, default=0)
     failures = Column(Integer, default=0)
     consecutive_failures = Column(Integer, default=0)
-    avg_latency = Column(Float, default=0.0) # Average runtime in seconds
-    avg_confidence = Column(Float, default=0.0) # Average intent score of leads
-    avg_freshness = Column(Float, default=0.0) # NEW: Average age of signals in minutes
-    avg_geo_score = Column(Float, default=0.0) # NEW: Average geographic relevance of leads
-    priority_score = Column(Float, default=0.0) # Unified ranking score
-    priority_boost = Column(Float, default=1.0) # Priority multiplier
-    auto_disabled = Column(Integer, default=0) # 0 = active, 1 = disabled
     last_success = Column(DateTime)
     history = Column(JSON) # List of last 20 runs
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -150,13 +122,10 @@ class CategoryMetric(Base):
     verified_rate = Column(Float, default=0.0)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-class ErrorLog(Base):
-    __tablename__ = "error_logs"
-
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+    
     id = Column(Integer, primary_key=True)
-    agent_id = Column(String, index=True, nullable=True)
-    scraper_name = Column(String, index=True, nullable=True)
-    error_type = Column(String, index=True) # TIMEOUT, CRASH, NETWORK
-    error_message = Column(Text)
-    stack_trace = Column(Text, nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
+    key = Column(String, unique=True, index=True)
+    value = Column(JSON)
+    updated_at = Column(DateTime, onupdate=func.now())
