@@ -87,12 +87,16 @@ class BaseScraper(ABC):
             
         results = []
         for s in signals:
+            contact = s.get("contact") or {}
             results.append({
+                "buyer_name": s.get("author") or "Unknown Buyer",
                 "title": s.get("title") or s.get("text") or s.get("snippet") or "Unknown Result",
-                "url": s.get("url"),
-                "source": s.get("source"),
-                "snippet": s.get("text") or s.get("snippet"),
+                "price": "", # Scrapers using this base method usually don't have price extraction yet
                 "location": s.get("location", location),
+                "phone": contact.get("phone") or "",
+                "source": s.get("source"),
+                "url": s.get("url"),
+                "snippet": s.get("text") or s.get("snippet"),
                 "timestamp": s.get("timestamp", datetime.now(timezone.utc).isoformat())
             })
         return results 

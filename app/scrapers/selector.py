@@ -1,6 +1,6 @@
 import logging
 from typing import Dict, Any, Optional, List
-from .registry import SCRAPER_REGISTRY, refresh_scraper_states, update_scraper_state
+from .registry import SCRAPER_REGISTRY, ACTIVE_SCRAPERS, refresh_scraper_states, update_scraper_state
 
 logger = logging.getLogger("ScraperSelector")
 
@@ -33,7 +33,7 @@ def decide_scrapers(
                 continue
             update_scraper_state(scraper_name, True, ttl_minutes=30, caller="Adaptation Engine")
 
-    for source, config in SCRAPER_REGISTRY.items():
+    for source, scraper in SCRAPER_REGISTRY.items():
         # 🛡️ SELF-OPTIMIZATION: Filter out auto-disabled weak scrapers
         from .metrics import SCRAPER_METRICS
         metrics = SCRAPER_METRICS.get(source, {})
@@ -41,23 +41,31 @@ def decide_scrapers(
             logger.info(f"DEBUG: Skipping {source} because auto_disabled is True")
             continue
 
+        # Check enabled status
+        is_enabled = source in ACTIVE_SCRAPERS
+        
+        # Get metadata from scraper instance if available, or default
+        mode = getattr(scraper, "mode", "production")
+        is_core = getattr(scraper, "core", False) # Default to False unless specified
+        
         # Rule 0: Sandbox scrapers are always included if enabled (for testing)
-        if config.get("mode") == "sandbox" and config.get("enabled"):
+        if mode == "sandbox" and is_enabled:
             active_scrapers.append(source)
             continue
         
         # Rule 0.5: Debug scrapers
-        if config.get("mode") == "debug" and config.get("enabled"):
+        if mode == "debug" and is_enabled:
              active_scrapers.append(source)
              continue
 
-        # Rule 1: Core scrapers are always on
-        if config.get("core"):
-            active_scrapers.append(source)
-            continue
+        # Rule 1: Core scrapers are always on (if we had a way to define them)
+        # For now, we rely on enabled status.
+        # if is_core:
+        #    active_scrapers.append(source)
+        #    continue
             
         # Rule 2: Respect manual/TTL enabled state
-        if config.get("enabled"):
+        if is_enabled:
             active_scrapers.append(source)
             continue
 

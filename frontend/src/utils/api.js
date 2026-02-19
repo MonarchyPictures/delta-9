@@ -10,21 +10,23 @@ export const headers = {
 };
 
 // Helper for retries with exponential backoff
-const fetchWithRetry = async (url, options = {}, retries = 3, backoff = 1000) => {
+export const fetchWithRetry = async (url, options = {}, retries = 3, backoff = 1000) => {
   try {
     const response = await fetch(url, options);
-    if (!response.ok) {
-      if (retries > 0 && (response.status >= 500 || response.status === 404)) {
-        // Retry for server errors or temporary 404s (e.g. during startup)
+    
+    // Retry on 5xx server errors
+    // We do NOT retry on 4xx (client errors) as they are likely permanent
+    if (!response.ok && retries > 0 && response.status >= 500) {
         await new Promise(resolve => setTimeout(resolve, backoff));
         return fetchWithRetry(url, options, retries - 1, backoff * 2);
-      }
-      throw new Error(`HTTP error! status: ${response.status}`);
     }
+    
+    // Return response even if not ok, so caller can handle 4xx
     return response;
   } catch (error) {
+    // Retry on network errors (TypeError: Failed to fetch)
     if (retries > 0) {
-      console.warn(`Fetch failed, retrying in ${backoff}ms...`, error);
+      console.warn(`Fetch failed (network error), retrying in ${backoff}ms...`, error);
       await new Promise(resolve => setTimeout(resolve, backoff));
       return fetchWithRetry(url, options, retries - 1, backoff * 2);
     }

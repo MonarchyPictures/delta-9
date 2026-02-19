@@ -344,7 +344,7 @@ if os.path.exists(dist_path):
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         # Skip if path is an API endpoint
-        if full_path.startswith("api/") or full_path.startswith("notifications") or full_path.startswith("leads") or full_path.startswith("agents"):
+        if full_path.startswith("api/") or full_path.startswith("notifications") or full_path.startswith("leads") or full_path.startswith("agents") or full_path.startswith("search") or full_path.startswith("success"):
             raise HTTPException(status_code=404)
             
         file_path = os.path.join(dist_path, full_path)

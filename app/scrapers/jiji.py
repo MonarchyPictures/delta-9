@@ -105,16 +105,24 @@ class ClassifiedsScraper(BaseScraper):
                 await page.wait_for_timeout(1000)
 
                 ads = await page.query_selector_all(".b-list-ad")
+                logger.info(f"Jiji found {len(ads)} ads")
 
                 for ad in ads:
-                    title_element = await ad.query_selector(".b-ad-title")
+                    title_element = await ad.query_selector(".b-ad-title-inner") # Correct selector
+                    if not title_element:
+                        # Fallback
+                        title_element = await ad.query_selector("h3") or await ad.query_selector(".qa-ad-title")
+                        
                     if not title_element:
                         continue
 
                     title = (await title_element.inner_text()).lower()
 
                     if not self.is_buyer(title):
+                        logger.info(f"Jiji Filtered (Seller/Neutral): {title}")
                         continue
+                    
+                    logger.info(f"Jiji Found Buyer: {title}")
 
                     price_element = await ad.query_selector(".qa-advert-price")
                     link_element = await ad.query_selector("a")
@@ -126,11 +134,18 @@ class ClassifiedsScraper(BaseScraper):
                     if link and not link.startswith("http"):
                         link = f"https://jiji.co.ke{link}"
 
+                    snippet = f"{title} {price or ''}"
+
                     results.append({
+                        "buyer_name": "Jiji User",
                         "title": title,
-                        "price": price,
+                        "price": price or "",
+                        "location": location,
+                        "phone": None,
+                        "source": "jiji",
+                        "intent_score": 0.85, # Pre-verified by is_buyer check
                         "url": link,
-                        "source": "jiji"
+                        "snippet": snippet
                     })
             except Exception as e:
                 logger.error(f"Jiji search failed: {e}")
@@ -145,7 +160,17 @@ class ClassifiedsScraper(BaseScraper):
         return f"looking for {query}"
 
     def is_buyer(self, title):
-        # Strict demand-only logic
-        if any(s in title for s in SELLER_KEYWORDS):
-            return False
-        return any(b in title for b in BUYER_KEYWORDS)
+        # Strict demand-only logic - RESTORED for user "why I am seeing sellers" request
+        
+        # If explicitly contains STRONG buyer keywords, always accept (even if "brand new" is present)
+        # e.g. "Looking for brand new laptop" -> Accept
+        if any(b in title for b in BUYER_KEYWORDS):
+            return True
+
+        # Jiji is primarily a SELLER platform. 
+        # A neutral title like "iPhone 13" is 99% a seller.
+        # We MUST require explicit buyer keywords to avoid flooding with seller ads.
+        
+        # Exception: If title starts with "wanted" or "looking", we catch it above.
+        # If not caught above, and it's just "iPhone 13", we REJECT it.
+        return False

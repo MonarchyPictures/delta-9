@@ -22,7 +22,8 @@ HIGH_RECALL_MODE = True
 # Production Safety Guard
 if ENV == "production" or os.getenv("PIPELINE_MODE") == "strict":
     HIGH_RECALL_MODE = False
-    INTENT_THRESHOLD = float(os.getenv("MIN_INTENT_SCORE", 0.75))
+    # Lower threshold to 0.45 even in strict mode to fix "restriction" complaints
+    INTENT_THRESHOLD = float(os.getenv("MIN_INTENT_SCORE", 0.45))
     MIN_INTENT_SCORE = INTENT_THRESHOLD  # Update alias
     REQUIRE_VERIFICATION = True # Real verified sources only
     PROD_STRICT = True  # Enforce strict mode in production

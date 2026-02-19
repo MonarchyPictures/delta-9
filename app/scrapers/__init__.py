@@ -10,7 +10,6 @@ from .instagram import InstagramScraper
 from .google_maps import GoogleMapsScraper
 from .whatsapp_public_groups import WhatsAppPublicGroupScraper
 from .reddit import RedditScraper
-from .runner import run_scrapers
 
 __all__ = [
     "BaseScraper",
@@ -25,5 +24,4 @@ __all__ = [
     "GoogleMapsScraper",
     "WhatsAppPublicGroupScraper",
     "RedditScraper",
-    "run_scrapers"
 ]

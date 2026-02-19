@@ -10,12 +10,23 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8001',
+        target: 'http://127.0.0.1:8001',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
-        timeout: 120000, // Increased to 120 seconds for deep discovery
-        proxyTimeout: 120000,
-      }
+        timeout: 300000, // 5 minutes
+        proxyTimeout: 300000,
+      },
+      '/leads': { target: 'http://127.0.0.1:8001', timeout: 300000 },
+      '/notifications': { target: 'http://127.0.0.1:8001', timeout: 300000 },
+      '/agents': { target: 'http://127.0.0.1:8001', timeout: 300000 },
+      '/success': { target: 'http://127.0.0.1:8001', timeout: 300000 },
+      '/search': { target: 'http://127.0.0.1:8001', timeout: 300000, proxyTimeout: 300000 },
+      '/scrapers': { target: 'http://127.0.0.1:8001', timeout: 300000 },
+      '/pipeline': { target: 'http://127.0.0.1:8001', timeout: 300000 },
+      '/outreach': { target: 'http://127.0.0.1:8001', timeout: 300000 },
+      '/settings': { target: 'http://127.0.0.1:8001', timeout: 300000 },
+      '/health': { target: 'http://127.0.0.1:8001', timeout: 300000 },
+      '/ready': { target: 'http://127.0.0.1:8001', timeout: 300000 }
     }
   },
   preview: {
@@ -30,7 +41,14 @@ export default defineConfig({
       '/leads': 'http://127.0.0.1:8001',
       '/notifications': 'http://127.0.0.1:8001',
       '/agents': 'http://127.0.0.1:8001',
-      '/success': 'http://127.0.0.1:8001'
+      '/success': 'http://127.0.0.1:8001',
+      '/search': 'http://127.0.0.1:8001',
+      '/scrapers': 'http://127.0.0.1:8001',
+      '/pipeline': 'http://127.0.0.1:8001',
+      '/outreach': 'http://127.0.0.1:8001',
+      '/settings': 'http://127.0.0.1:8001',
+      '/health': 'http://127.0.0.1:8001',
+      '/ready': 'http://127.0.0.1:8001'
     }
   }
 })

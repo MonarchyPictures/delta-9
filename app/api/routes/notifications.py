@@ -20,11 +20,16 @@ def count_notifications(unread_only: bool = False, db: Session = Depends(get_db)
 
 @router.get("/", response_model=List[NotificationResponse])
 def list_notifications(db: Session = Depends(get_db)):
-    return (
-        db.query(Notification)
-        .order_by(Notification.created_at.desc())
-        .all()
-    )
+    try:
+        return (
+            db.query(Notification)
+            .order_by(Notification.created_at.desc())
+            .all()
+        )
+    except Exception as e:
+        # Graceful fallback if table missing or DB error
+        print(f"Notifications Error: {e}")
+        return []
 
 
 @router.post("/{notification_id}/read")

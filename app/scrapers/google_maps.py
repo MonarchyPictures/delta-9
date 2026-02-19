@@ -11,17 +11,17 @@ class GoogleMapsScraper(BaseScraper):
     def scrape(self, query: str, time_window_hours: int): 
         logger.info(f"GOOGLE_MAPS: Scraping for {query}")
         
-        # Check for location in query
-        location_suffix = ""
-        if "kenya" in query.lower() or "nairobi" in query.lower():
-            location_suffix = " Kenya"
-            loc_name = "Kenya"
+        # FORCE KENYA LOCATION
+        if "kenya" not in query.lower() and "nairobi" not in query.lower():
+             search_query = f"{query} Kenya"
         else:
-            loc_name = "Global"
+             search_query = query
+             
+        loc_name = "Kenya"
 
-        search = f"{query}{location_suffix} site:google.com/maps" 
+        search = f"{search_query} site:google.com/maps" 
         url = f"https://www.google.com/search?q={search}" 
-        html = self.get_page_content(url) 
+        html = self.get_page_content(url)  
         
         if not html:
             return []

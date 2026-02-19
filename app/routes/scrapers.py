@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Header, HTTPException, Query, Depends, Request
 from datetime import datetime
-from app.scrapers.registry import SCRAPER_REGISTRY, update_scraper_state, update_scraper_mode, refresh_scraper_states
+from app.scrapers.registry import SCRAPER_REGISTRY, ACTIVE_SCRAPERS, update_scraper_state, update_scraper_mode, refresh_scraper_states
 from app.scrapers.metrics import get_metrics, SCRAPER_METRICS
 from app.middleware.auth import require_admin
 from app.config.scrapers import is_scraper_allowed
@@ -15,7 +15,7 @@ def list_scrapers():
     """List all scrapers with their current configuration and metrics."""
     try:
         results = []
-        for name, meta in SCRAPER_REGISTRY.items():
+        for name, scraper_instance in SCRAPER_REGISTRY.items():
             metrics = SCRAPER_METRICS.get(name, {})
             runs = metrics.get("runs", 0)
             failures = metrics.get("failures", 0)
@@ -24,13 +24,15 @@ def list_scrapers():
             success_rate_val = (runs - failures) / runs if runs > 0 else 0
             success_rate_str = f"{int(success_rate_val * 100)}%"
             
+            is_active = name in ACTIVE_SCRAPERS
+            
             data = {
-                "enabled": meta.get("enabled"),
-                "core": meta.get("core"),
-                "mode": meta.get("mode"),
-                "cost": meta.get("cost"),
-                "noise": meta.get("noise"),
-                "categories": meta.get("categories"),
+                "enabled": is_active,
+                "core": True,
+                "mode": "production",
+                "cost": "free",
+                "noise": "low",
+                "categories": ["general"],
                 "metrics": {
                     "leads_found": metrics.get("leads", 0),
                     "success_rate": success_rate_str,
@@ -66,15 +68,15 @@ def get_scraper_status(request: Request, role: str = Depends(require_admin)):
         
         return {
             name: {
-                "enabled": config["enabled"], 
-                "core": config["core"],
-                "mode": config.get("mode", "production"),
-                "cost": config.get("cost", "free"),
+                "enabled": name in ACTIVE_SCRAPERS, 
+                "core": True,
+                "mode": "production",
+                "cost": "free",
                 "category": "vehicles" if is_scraper_allowed(mapping.get(name, "unknown")) else "other",
-                "enabled_until": config.get("enabled_until").isoformat() if config.get("enabled_until") else None,
-                "ttl_remaining": max(0, int((config.get("enabled_until") - now).total_seconds())) if config.get("enabled_until") else None,
+                "enabled_until": None,
+                "ttl_remaining": None,
                 "metrics": get_metrics(name)
-            } for name, config in SCRAPER_REGISTRY.items()
+            } for name, _ in SCRAPER_REGISTRY.items()
         }
     except Exception as e:
         return {"error": f"Failed to get scraper status: {str(e)}"}

@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
-from app.pipeline.dispatcher import run_pipeline 
+from app.services.search_service import search as service_search
 from app.config.runtime import PIPELINE_MODE, PROD_RELAXED, PROD_STRICT, INTENT_THRESHOLD, REQUIRE_VERIFICATION, ALLOW_MOCK
-from app.intelligence_v2.thresholds import STRICT_PUBLIC
 
 router = APIRouter() 
 
@@ -34,20 +33,20 @@ async def search(request: Request, payload: dict, background_tasks: BackgroundTa
         }
 
     try:
-        results, rejected, metrics = await run_pipeline( 
-            query=query, 
-            location=location, 
-            headers=request.headers,
-            background_tasks=background_tasks,
-            tier=1 # ⚡ MANUAL SEARCH IS ALWAYS TIER 1 (FAST)
-        ) 
+        # Use new search service
+        search_data = await service_search(query, location)
+        
+        results = search_data.get("results", [])
+        metrics = search_data.get("metrics", {})
+        rejected = metrics.get("rejected", [])
+        
     except Exception as e:
         logger.error(f"CRITICAL PIPELINE ERROR: {e}")
         return {
             "results": [],
             "count": 0,
             "total_signals_captured": 0,
-            "error": "Internal search pipeline error. Please check backend logs."
+            "error": f"Internal search pipeline error: {str(e)}"
         } 
 
     # 🎯 DISPLAY LAYER FILTERING (Annotate, Don't Block)
@@ -57,7 +56,7 @@ async def search(request: Request, payload: dict, background_tasks: BackgroundTa
     filtered_results = []
     for r in results:
         # Annotate visibility status
-        if r.get("intent_score", 0) >= min_score or r.get("intent_type") == "BUYER":
+        if r.get("intent_score", 0) >= min_score:
             r["ui_filter_status"] = "shown"
         else:
             r["ui_filter_status"] = "low_confidence"
@@ -70,12 +69,11 @@ async def search(request: Request, payload: dict, background_tasks: BackgroundTa
     response = { 
         "results": filtered_results, 
         "count": len(filtered_results),
-        "total_signals_captured": metrics.get("scraped", len(results)),
-        "metrics": metrics
+        "total_signals_captured": metrics.get("total_found", 0),
+        "metrics": metrics,
+        "rejected": rejected,
+        "status": search_data.get("status", "success")
     } 
-
-    if payload.get("debug"):
-        response["rejected"] = rejected
 
     if PIPELINE_MODE != "strict": 
         response["warning"] = "Low-confidence signals shown" 

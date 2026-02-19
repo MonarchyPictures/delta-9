@@ -11,7 +11,8 @@ import {
   API_URL, 
   API_KEY, 
   GOOGLE_CSE_ID, 
-  fetchLeadsMeta 
+  fetchLeadsMeta,
+  fetchWithRetry
 } from '../utils/api';
 
 const Dashboard = () => {
@@ -31,6 +32,15 @@ const Dashboard = () => {
   const [debugData, setDebugData] = useState(null);
   
   const searchControllerRef = useRef(null);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (searchControllerRef.current) {
+        searchControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   // Sync with URL query param
   useEffect(() => {
@@ -82,7 +92,7 @@ const Dashboard = () => {
     // Increased timeout for deep discovery (300s) to align with backend multi-pass strategy
     const timeoutId = setTimeout(() => {
       if (searchControllerRef.current === controller) {
-        controller.abort();
+        controller.abort(new Error("Search request timed out after 5 minutes."));
       }
     }, 300000);
 
@@ -95,7 +105,7 @@ const Dashboard = () => {
         setHasSearched(true);
         
         // ABSOLUTE RULE: Real-time discovery with no-store cache
-        const searchRes = await fetch(`${apiUrl}/search`, {
+        const searchRes = await fetchWithRetry(`${apiUrl}/search`, {
           method: 'POST',
           signal: controller.signal,
           headers: { 
@@ -130,8 +140,12 @@ const Dashboard = () => {
         }
 
         if (searchData.results && searchData.results.length > 0) {
-          // User Requested: Frontend Sorting by buyer_match_score
-          const sortedResults = [...searchData.results].sort((a, b) => (b.buyer_match_score || 0) - (a.buyer_match_score || 0));
+          // User Requested: Frontend Sorting by buyer_match_score (fallback to intent_score)
+          const sortedResults = [...searchData.results].sort((a, b) => {
+              const scoreA = a.buyer_match_score || a.intent_score || 0;
+              const scoreB = b.buyer_match_score || b.intent_score || 0;
+              return scoreB - scoreA;
+          });
           setLeads(sortedResults);
           setLoading(false);
           return;
@@ -151,7 +165,7 @@ const Dashboard = () => {
       }
 
       // Fallback or Polling: Fetch from standard leads endpoint
-      const res = await fetch(`${apiUrl}/leads?query=${encodeURIComponent(searchQuery)}&limit=10`, {
+      const res = await fetchWithRetry(`${apiUrl}/leads?query=${encodeURIComponent(searchQuery)}&limit=10`, {
         signal: controller.signal,
         headers: {
           'X-API-Key': apiKey,
@@ -172,15 +186,17 @@ const Dashboard = () => {
       if (data && data.leads) {
         finalLeads = data.leads;
       } else {
-        finalLeads = Array.isArray(data) ? data : [];
+        console.log("Search Success. Metrics:", data.metrics);
+        finalLeads = data.results || (Array.isArray(data) ? data : []);
       }
 
       // User Requested: Frontend Sorting by buyer_match_score
       const sortedLeads = [...finalLeads].sort((a, b) => (b.buyer_match_score || 0) - (a.buyer_match_score || 0));
       setLeads(sortedLeads);
     } catch (err) {
+      if (err.name === 'AbortError') return; // Silent return for expected aborts
+      
       console.error("REAL ERROR:", err);
-      if (err.name === 'AbortError') return;
       console.error("Search failed:", err);
       let msg = err?.message || String(err) || "Backend connection failed. Check if server is running.";
       if (msg === "Failed to fetch") {
@@ -214,7 +230,9 @@ const Dashboard = () => {
   };
 
   const handleSearch = (e) => {
-    if (e.key === 'Enter' && query.trim()) fetchLeads(query);
+    if (e.key === 'Enter' && query.trim()) {
+        fetchLeads(query);
+    }
   };
 
   // Google CSE script effect
@@ -317,9 +335,14 @@ const Dashboard = () => {
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {leads.slice(0, 4).map((lead, index) => {
-                const isRecent = lead.timestamp && (new Date() - new Date(lead.timestamp)) < 24 * 60 * 60 * 1000;
-                const isHighIntent = lead.intent_score >= 0.8;
-                const hasWhatsApp = !!lead.whatsapp_link;
+                const timestamp = lead.timestamp || lead.request_timestamp || lead.created_at;
+                const isRecent = timestamp && (new Date() - new Date(timestamp)) < 24 * 60 * 60 * 1000;
+                const score = lead.intent_score || lead.score || lead.buyer_match_score || 0;
+                const isHighIntent = score >= 0.8;
+                const whatsappUrl = lead.whatsapp_url || lead.whatsapp_link;
+                const sourceUrl = lead.source_url || lead.url;
+                const hasWhatsApp = !!whatsappUrl;
+                const intentText = lead.buyer_request_snippet || lead.buyer_intent_quote || lead.intent || lead.title || "Verified Signal";
                 
                 return (
                   <motion.div 
@@ -347,17 +370,17 @@ const Dashboard = () => {
                           </span>
                         )}
                       </div>
-                      <div className="text-white/40 text-[10px] font-black uppercase tracking-widest bg-white/5 px-2 py-1 rounded">Score: {lead.intent_score || lead.score}</div>
+                      <div className="text-white/40 text-[10px] font-black uppercase tracking-widest bg-white/5 px-2 py-1 rounded">Score: {typeof score === 'number' ? score.toFixed(2) : score}</div>
                     </div>
                     
                     <h3 className="text-white font-black text-lg mb-4 italic leading-tight">
-                      "{lead.intent?.length > 60 ? lead.intent.substring(0, 60) + '...' : lead.intent}"
+                      "{intentText.length > 60 ? intentText.substring(0, 60) + '...' : intentText}"
                     </h3>
 
                     <div className="flex gap-3 mt-auto">
-                      {lead.whatsapp_url && (
+                      {whatsappUrl && (
                         <a 
-                          href={lead.whatsapp_url} 
+                          href={whatsappUrl} 
                           target="_blank" 
                           rel="noreferrer"
                           className="flex-1 bg-green-600/20 hover:bg-green-600 text-green-500 hover:text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-center transition-all flex items-center justify-center gap-2 cursor-pointer"
@@ -365,9 +388,9 @@ const Dashboard = () => {
                           <MessageSquare size={14} /> WhatsApp
                         </a>
                       )}
-                      {lead.source_url && (
+                      {sourceUrl && (
                         <a 
-                          href={lead.source_url} 
+                          href={sourceUrl} 
                           target="_blank" 
                           rel="noreferrer"
                           className="flex-1 bg-white/5 hover:bg-white/10 text-white/40 hover:text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-center transition-all flex items-center justify-center gap-2 cursor-pointer"

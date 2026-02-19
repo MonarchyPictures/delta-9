@@ -62,12 +62,20 @@ const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange, onTap }) =>
     return { icon: "⚪", label: "ignore", color: "text-white/20", border: "border-white/10", bg: "bg-white/5" };
   };
 
-  const isRecent = lead.timestamp && (new Date() - new Date(lead.timestamp)) < 24 * 60 * 60 * 1000;
-  const isHighIntent = lead.intent_score >= 0.8;
-  const matchCue = getMatchCue(lead.buyer_match_score);
+  // Robust Field Access (Matches Dashboard.jsx)
+  const timestamp = lead.timestamp || lead.request_timestamp || lead.created_at;
+  const isRecent = timestamp && (new Date() - new Date(timestamp)) < 24 * 60 * 60 * 1000;
+  
+  const score = lead.intent_score || lead.score || lead.buyer_match_score || 0;
+  const isHighIntent = score >= 0.8;
+  const matchCue = getMatchCue(lead.buyer_match_score || score); // Prefer buyer_match_score for cue if available
 
-  const hasWhatsApp = !!lead.whatsapp_link;
   const whatsappLink = lead.whatsapp_url || lead.whatsapp_link;
+  const hasWhatsApp = !!whatsappLink;
+  
+  const intentText = lead.buyer_request_snippet || lead.buyer_intent_quote || lead.intent || lead.title || "Verified Signal";
+  const sourceUrl = lead.source_url || lead.url;
+  const displayTitle = lead.buyer_name || lead.source || "Market Signal";
 
   const displayPhone = (phone) => {
     if (!phone) return null;
@@ -207,23 +215,23 @@ const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange, onTap }) =>
           </div>
           <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest flex items-center gap-1">
             <Clock size={10} />
-            {timeAgo(lead.timestamp)}
+            {timeAgo(timestamp)}
           </span>
         </div>
 
         {/* User Info - ENRICHED */}
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-white font-black text-sm italic">
-            {lead.buyer_name?.charAt(0) || 'B'}
+            {displayTitle?.charAt(0) || 'B'}
           </div>
           <div>
             <div className="text-white font-bold text-sm flex items-center gap-2">
-              {lead.buyer_name || 'Verified Buyer'}
-              {lead.phone && <span className="text-green-500"><ShieldCheck size={12} /></span>}
+              {displayTitle}
+              {(lead.phone || lead.contact_phone) && <span className="text-green-500"><ShieldCheck size={12} /></span>}
             </div>
             <div className="text-white/40 text-[10px] font-black uppercase tracking-widest">
               <p className="text-green-400 font-medium"> 
-                📞 {lead.phone || "No phone found"} 
+                📞 {displayPhone(lead.phone || lead.contact_phone) || "No phone found"} 
               </p> 
             </div>
           </div>
@@ -231,11 +239,11 @@ const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange, onTap }) =>
 
         {/* Product + Intent Text - READ */}
         <div className="mb-4">
-          <div className="text-blue-500 text-[11px] font-black uppercase tracking-[0.2em] mb-1">{lead.product || 'General Request'}</div>
+          <div className="text-blue-500 text-[11px] font-black uppercase tracking-[0.2em] mb-1">{lead.product || lead.title || 'General Request'}</div>
           <h3 className="text-white font-black text-xl leading-tight group-hover:text-blue-400 transition-colors italic">
-            "Looking for {lead.product}{lead.quantity ? ` (${lead.quantity})` : ''}"
+            "{intentText}"
           </h3>
-          {lead.buyer_request_snippet && (
+          {lead.buyer_request_snippet && lead.buyer_request_snippet !== intentText && (
             <p className="text-white/40 text-xs mt-2 line-clamp-2 italic font-medium leading-relaxed">
               ...{lead.buyer_request_snippet.substring(0, 150)}...
             </p>
@@ -246,19 +254,19 @@ const LeadCard = ({ lead, onSave, onDelete, onClick, onStatusChange, onTap }) =>
         <div className="flex items-center gap-4 mb-6">
           <div className="flex items-center gap-1.5 text-white/60 text-xs font-bold">
             <MapPin size={14} className="text-blue-500" />
-            <span>{lead.location || 'Kenya'}</span>
+            <span>{lead.location || lead.location_raw || 'Kenya'}</span>
             {lead.distance_km > 0 && (
               <span className="text-white/30 ml-1">({lead.distance_km}km)</span>
             )}
           </div>
           <div className="flex items-center gap-1.5 text-white/40 text-[10px] font-black uppercase tracking-widest">
-            <span>{lead.source}</span>
+            <span>{lead.source || lead.source_platform || 'Web'}</span>
           </div>
-          {lead.source_url && (
+          {sourceUrl && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                window.open(lead.source_url, '_blank');
+                window.open(sourceUrl, '_blank');
               }}
               className="ml-auto text-blue-500 hover:text-blue-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-1 transition-colors cursor-pointer"
             >

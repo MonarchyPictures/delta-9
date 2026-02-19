@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, Any
 from .metrics import SCRAPER_METRICS
-from .registry import SCRAPER_REGISTRY, update_scraper_state
+from .registry import SCRAPER_REGISTRY, ACTIVE_SCRAPERS, update_scraper_state
 
 logger = logging.getLogger("ScraperSupervisor")
 
@@ -31,7 +31,14 @@ def revive_scrapers():
     logger.info("SELF-HEALING: Checking for scrapers to revive...")
     for name, metrics in SCRAPER_METRICS.items(): 
         # Skip core scrapers (they are always on) or already enabled ones
-        if SCRAPER_REGISTRY.get(name, {}).get("core") or SCRAPER_REGISTRY.get(name, {}).get("enabled"):
+        scraper = SCRAPER_REGISTRY.get(name)
+        if not scraper:
+            continue
+            
+        is_core = getattr(scraper, "core", False)
+        is_enabled = name in ACTIVE_SCRAPERS
+        
+        if is_core or is_enabled:
             continue
 
         # Logic: Scrapers earn trust back if they have few failures and high verified leads

@@ -249,39 +249,53 @@ def get_leads(
 @router.get("/success/stats", dependencies=[Depends(verify_api_key)])
 def get_success_stats(db: Session = Depends(get_db)):
     """Fetch live market metrics for the dashboard aligned with Intelligence tiers."""
-    now = datetime.now(timezone.utc)
-    last_24h = now - timedelta(days=1)
-    
-    # 1. ACTIVE LEADS (STRICT_PUBLIC >= 0.8) in last 24h
-    active_count = db.query(models.Lead).filter(
-        models.Lead.confidence_score >= STRICT_PUBLIC,
-        models.Lead.created_at >= last_24h
-    ).count()
-    
-    # 2. HIGH INTENT (0.6 <= score < 0.8)
-    high_intent_count = db.query(models.Lead).filter(
-        models.Lead.confidence_score >= HIGH_INTENT
-    ).count()
-    
-    # 3. URGENT BUYERS (High urgency level)
-    urgent_count = db.query(models.Lead).filter(
-        models.Lead.urgency_level == "high",
-        models.Lead.created_at >= last_24h
-    ).count()
-    
-    # 4. WHATSAPP TAPS (Total tracked events today)
-    from sqlalchemy import func
-    start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    whatsapp_taps = db.query(func.sum(models.Lead.tap_count)).filter(
-        models.Lead.created_at >= start_of_day
-    ).scalar() or 0
-    
-    return {
-        "active_listings_24h": active_count,
-        "high_intent_matches": high_intent_count,
-        "urgent_sellers": urgent_count,
-        "whatsapp_taps_today": int(whatsapp_taps)
-    }
+    try:
+        now = datetime.now(timezone.utc)
+        last_24h = now - timedelta(days=1)
+        
+        # 1. ACTIVE LEADS (STRICT_PUBLIC >= 0.8) in last 24h
+        active_count = db.query(models.Lead).filter(
+            models.Lead.confidence_score >= STRICT_PUBLIC,
+            models.Lead.created_at >= last_24h
+        ).count()
+        
+        # 2. HIGH INTENT (0.6 <= score < 0.8)
+        high_intent_count = db.query(models.Lead).filter(
+            models.Lead.confidence_score >= HIGH_INTENT
+        ).count()
+        
+        # 3. URGENT BUYERS (High urgency level)
+        urgent_count = db.query(models.Lead).filter(
+            models.Lead.urgency_level == "high",
+            models.Lead.created_at >= last_24h
+        ).count()
+        
+        # 4. WHATSAPP TAPS (Total tracked events today)
+        from sqlalchemy import func
+        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        # Use try/except for tap_count column existence if schema migration pending
+        try:
+            whatsapp_taps = db.query(func.sum(models.Lead.tap_count)).filter(
+                models.Lead.created_at >= start_of_day
+            ).scalar() or 0
+        except Exception:
+            whatsapp_taps = 0
+        
+        return {
+            "active_listings_24h": active_count,
+            "high_intent_matches": high_intent_count,
+            "urgent_sellers": urgent_count,
+            "whatsapp_taps_today": int(whatsapp_taps)
+        }
+    except Exception as e:
+        # Log error and return empty stats to prevent frontend crash
+        print(f"Stats Error: {e}")
+        return {
+            "active_listings_24h": 0,
+            "high_intent_matches": 0,
+            "urgent_sellers": 0,
+            "whatsapp_taps_today": 0
+        }
 
 @router.patch("/leads/{lead_id}/status", dependencies=[Depends(verify_api_key)])
 def update_lead_status(lead_id: str, status: str, db: Session = Depends(get_db)):

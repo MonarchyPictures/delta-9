@@ -36,8 +36,12 @@ const LeadsDrawer = ({ isOpen, onClose, filterType }) => {
       const data = await res.json();
       const finalLeads = data.leads || (Array.isArray(data) ? data : []);
       
-      // Sort by score
-      const sorted = [...finalLeads].sort((a, b) => (b.buyer_match_score || 0) - (a.buyer_match_score || 0));
+      // Sort by score (Robust Fallback)
+      const sorted = [...finalLeads].sort((a, b) => {
+        const scoreA = a.buyer_match_score || a.intent_score || 0;
+        const scoreB = b.buyer_match_score || b.intent_score || 0;
+        return scoreB - scoreA;
+      });
       setLeads(sorted);
     } catch (err) {
       setError(err.message);

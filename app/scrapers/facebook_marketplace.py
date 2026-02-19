@@ -11,13 +11,13 @@ class FacebookMarketplaceScraper(BaseScraper):
     def scrape(self, query: str, time_window_hours: int): 
         logger.info(f"FACEBOOK: Scraping for {query}")
         
-        # Determine location for URL
-        if "kenya" in query.lower() or "nairobi" in query.lower():
-            url = f"https://www.facebook.com/marketplace/kenya/search?query={query}"
-            location_name = "Kenya"
-        else:
-            url = f"https://www.facebook.com/marketplace/search?query={query}"
-            location_name = "Global"
+        # FORCE KENYA LOCATION
+        # The user explicitly requested to lock to Kenya.
+        # We use 'nairobi' as the base location for Facebook Marketplace as it is the primary hub.
+        # 'kenya' path often redirects to global/IP-based if not specific.
+        search_query = f"{query} Kenya"
+        url = f"https://www.facebook.com/marketplace/nairobi/search?query={search_query}"
+        location_name = "Kenya"
         
         html = self.get_page_content(url, wait_selector="div[role='feed']") 
         # html = None # Placeholder
