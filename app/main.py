@@ -147,6 +147,39 @@ async def readiness_check(db: Session = Depends(get_db)):
         logger.error(f"Readiness check failed: {str(e)}")
         return JSONResponse(status_code=503, content={"status": "not_ready", "error": "Database unavailable"})
 
+# Serve React App (SPA Support) - PRODUCTION ONLY
+# Calculate paths relative to this file
+frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
+assets_dir = os.path.join(frontend_dir, "assets")
+
+# Mount assets if they exist (for static file serving)
+if os.path.exists(assets_dir):
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+@app.get("/{full_path:path}")
+async def serve_react_app(full_path: str):
+    """
+    Catch-all route to serve React SPA.
+    Matches any path not already handled by API routers.
+    """
+    # 1. Skip if path starts with 'api' (though routers should catch this first)
+    if full_path.startswith("api") or full_path.startswith("/api"):
+        raise HTTPException(status_code=404, detail="API Endpoint Not Found")
+
+    # 2. Serve index.html if it exists
+    if os.path.exists(frontend_dir):
+        index_path = os.path.join(frontend_dir, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+
+    # 3. Fallback if frontend is missing
+    return {
+        "status": "online",
+        "message": "Delta9 Production API - Frontend not built or not found. Please build the frontend.",
+        "version": "1.0.0",
+        "path_requested": full_path
+    }
+
 # --- Endpoints ---
 @app.on_event("startup")
 async def startup_event():
